@@ -1,3 +1,6 @@
 [submodule "third_party/libjxl"]
 	path = third_party/libjxl
 	url = https://github.com/libjxl/libjxl
+[submodule "third_party/libjpeg-turbo"]
+	path = third_party/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git

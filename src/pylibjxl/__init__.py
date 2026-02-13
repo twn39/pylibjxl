@@ -9,6 +9,10 @@ from ._pylibjxl import (
     encode,
     decode,
     JXL as _JXL,
+    encode_jpeg,
+    decode_jpeg,
+    jpeg_to_jxl,
+    jxl_to_jpeg,
 )
 
 __all__ = [
@@ -25,6 +29,14 @@ __all__ = [
     "write_async",
     "JXL",
     "AsyncJXL",
+    "encode_jpeg",
+    "decode_jpeg",
+    "jpeg_to_jxl",
+    "jxl_to_jpeg",
+    "encode_jpeg_async",
+    "decode_jpeg_async",
+    "jpeg_to_jxl_async",
+    "jxl_to_jpeg_async",
 ]
 
 
@@ -204,12 +216,28 @@ class AsyncJXL(_JXL):
         data = await asyncio.to_thread(filepath.read_bytes)
         return await asyncio.to_thread(self.decode, data, metadata)
 
-    async def write_async(self, path, image, effort=None, distance=None, lossless=None,
-                          *, exif=None, xmp=None, jumbf=None):
+    async def write_async(self, path, image, effort=None, distance=None, lossless=None):
         """Asynchronously encode and write to a JXL file."""
-        data = await asyncio.to_thread(
-            self.encode, image, effort, distance, lossless, exif, xmp, jumbf
-        )
+        data = await asyncio.to_thread(self.encode, image, effort, distance, lossless)
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(filepath.write_bytes, data)
+
+
+# ─── JPEG & Transcoding ───
+
+async def encode_jpeg_async(input, quality=95):
+    """Async encode numpy array to JPEG bytes."""
+    return await asyncio.to_thread(encode_jpeg, input, quality=quality)
+
+async def decode_jpeg_async(data):
+    """Async decode JPEG bytes to numpy array."""
+    return await asyncio.to_thread(decode_jpeg, data)
+
+async def jpeg_to_jxl_async(data, effort=7):
+    """Async losslessly recompress JPEG bytes to JXL bytes."""
+    return await asyncio.to_thread(jpeg_to_jxl, data, effort=effort)
+
+async def jxl_to_jpeg_async(data):
+    """Async reconstruct original JPEG bytes from JXL bytes."""
+    return await asyncio.to_thread(jxl_to_jpeg, data)
