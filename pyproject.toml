@@ -24,6 +24,22 @@ cmake.version = ">=3.15"
 ninja.version = ">=1.10"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["src/pylibjxl"]
+install.components = ["runtime"]
+
+[tool.scikit-build.sdist]
+exclude = [
+    "third_party/libjxl/testdata",
+    "third_party/libjxl/doc",
+    "third_party/libjxl/examples",
+    "third_party/libjxl/third_party/googletest",
+    "third_party/libjxl/third_party/benchmark",
+    "third_party/libjpeg-turbo/testimages",
+    "third_party/libjpeg-turbo/doc",
+    "images",
+    ".idea",
+    ".pytest_cache",
+    ".benchmarks"
+]
 
 [dependency-groups]
 dev = [

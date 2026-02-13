@@ -19,6 +19,14 @@ set(ENABLE_STATIC ON CACHE BOOL "" FORCE)
 set(WITH_TURBOJPEG ON CACHE BOOL "" FORCE)
 set(WITH_TOOLS OFF CACHE BOOL "" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+
+# Prevent third-party libraries from installing their files into our wheel
+set(SKIP_INSTALL_ALL TRUE)
+set(SKIP_INSTALL_LIBRARIES TRUE)
+set(SKIP_INSTALL_HEADERS TRUE)
+set(SKIP_INSTALL_EXECUTABLES TRUE)
+set(SKIP_INSTALL_FILES TRUE)
+
 # Apply patch to libjpeg-turbo
 find_package(Git REQUIRED)
 execute_process(
@@ -89,4 +97,23 @@ target_link_libraries(_pylibjxl PRIVATE jxl jxl_threads turbojpeg-static)
 # Set target properties
 target_compile_features(_pylibjxl PRIVATE cxx_std_17)
 
-install(TARGETS _pylibjxl DESTINATION pylibjxl)
+# Assign to runtime component so scikit-build-core only installs this
+install(TARGETS _pylibjxl
+    DESTINATION pylibjxl
+    COMPONENT runtime
+)
+
+# Strip symbols in Release mode to further reduce size
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(APPLE)
+        add_custom_command(TARGET _pylibjxl POST_BUILD
+            COMMAND strip -x $<TARGET_FILE:_pylibjxl>
+            COMMENT "Stripping symbols from _pylibjxl"
+        )
+    elseif(UNIX)
+        add_custom_command(TARGET _pylibjxl POST_BUILD
+            COMMAND strip --strip-unneeded $<TARGET_FILE:_pylibjxl>
+            COMMENT "Stripping symbols from _pylibjxl"
+        )
+    endif()
+endif()
