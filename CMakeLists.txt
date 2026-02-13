@@ -1,15 +1,13 @@
 cmake_minimum_required(VERSION 3.15)
 project(pylibjxl LANGUAGES C CXX)
 
-# Optimization: Enable IPO and Hidden Visibility as per GEMINI.md
-include(CheckIPOSupported)
-check_ipo_supported(RESULT ipo_supported OUTPUT error)
-if(ipo_supported)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-endif()
+# Disable IPO (LTO) for now as it causes relocation issues on Linux with static libs
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
@@ -21,8 +19,10 @@ set(WITH_TOOLS OFF CACHE BOOL "" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "" FORCE)
 
 # Fix for Linux LTO: Disable TLS to avoid relocation R_X86_64_TPOFF32 error
+# libjpeg-turbo doesn't have a WITH_TLS option, it auto-detects. 
+# We force it off by defining THREAD_LOCAL as empty.
 if(UNIX AND NOT APPLE)
-    set(WITH_TLS OFF CACHE BOOL "" FORCE)
+    add_definitions("-DTHREAD_LOCAL=")
 endif()
 
 # Prevent third-party libraries from installing their files into our wheel
@@ -55,19 +55,6 @@ else()
 endif()
 
 add_subdirectory(third_party/libjpeg-turbo)
-
-# Fix for Linux LTO: Disable IPO for third-party targets to avoid linkage issues
-if(ipo_supported AND UNIX AND NOT APPLE)
-    if(TARGET turbojpeg-static)
-        set_target_properties(turbojpeg-static PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
-    endif()
-    if(TARGET jpeg-static)
-        set_target_properties(jpeg-static PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
-    endif()
-    if(TARGET simd)
-        set_target_properties(simd PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
-    endif()
-endif()
 
 # Expose libjpeg-turbo to libjxl (mock FindJPEG)
 set(JPEG_FOUND TRUE CACHE BOOL "" FORCE)
