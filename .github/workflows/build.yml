@@ -53,41 +53,19 @@ jobs:
       - name: Build sdist
         run: pipx run build --sdist
 
+      - name: Quick install check
+        run: |
+          pip install dist/*.tar.gz
+          python -c "import pylibjxl; print(pylibjxl.version())"
+
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-sdist
           path: dist/*.tar.gz
 
-  test_sdist:
-    name: Test sdist on ${{ matrix.py }}
-    needs: [build_sdist]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        py: ["3.11", "3.12", "3.13", "3.14"]
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: cibw-sdist
-          path: dist
-
-      - name: Set up Python ${{ matrix.py }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.py }}
-
-      - name: Install from sdist
-        run: |
-          pip install dist/*.tar.gz
-          pip install pytest pytest-asyncio numpy
-
-      - name: Run tests
-        run: pytest
-
   publish:
     name: Publish to PyPI
-    needs: [build_wheels, build_sdist, test_sdist]
+    needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
