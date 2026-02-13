@@ -55,6 +55,7 @@ jobs:
 
       - name: Quick install check
         run: |
+          pip install numpy
           pip install dist/*.tar.gz
           python -c "import pylibjxl; print(pylibjxl.version())"
 
