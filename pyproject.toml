@@ -4,16 +4,39 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pylibjxl"
-version = "0.1.1"
-description = "Python bindings for libjxl using pybind11"
+version = "0.1.2"
+description = "Fast Python bindings for libjxl and libjpeg-turbo with GIL-free encoding/decoding and native async support."
 readme = "README.md"
+license = { text = "BSD-3-Clause" }
 authors = [
     { name = "curry tang", email = "twn39@163.com" }
 ]
-requires-python = ">=3.11"
-dependencies = [
-    "numpy",
+requires-python = ">=3.11, <3.15"
+keywords = ["jpeg-xl", "jxl", "jpeg", "libjxl", "libjpeg-turbo", "pybind11", "numpy", "asyncio", "image-processing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: C++",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+    "Framework :: AsyncIO",
+    "Operating System :: OS Independent",
 ]
+dependencies = [
+    "numpy>=1.20",
+]
+
+[project.urls]
+Homepage = "https://github.com/user/pylibjxl"
+Repository = "https://github.com/user/pylibjxl.git"
+Issues = "https://github.com/user/pylibjxl/issues"
+Documentation = "https://github.com/user/pylibjxl#readme"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

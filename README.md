@@ -1,5 +1,10 @@
 # pylibjxl
 
+[![CI](https://github.com/user/pylibjxl/actions/workflows/build.yml/badge.svg)](https://github.com/user/pylibjxl/actions/workflows/build.yml)
+[![PyPI version](https://img.shields.io/pypi/v/pylibjxl.svg)](https://pypi.org/project/pylibjxl/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pylibjxl.svg)](https://pypi.org/project/pylibjxl/)
+[![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+
 Fast Python bindings for [libjxl](https://github.com/libjxl/libjxl) and [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo). Built with [pybind11](https://github.com/pybind/pybind11), with GIL-free encoding/decoding and native async support.
 
 ## Features
@@ -23,12 +28,17 @@ Fast Python bindings for [libjxl](https://github.com/libjxl/libjxl) and [libjpeg
 
 ### Install
 
+Using [uv](https://github.com/astral-sh/uv) (recommended):
+
+```bash
+uv pip install git+https://github.com/user/pylibjxl.git --recursive
+```
+
+Or via pip:
+
 ```bash
 git clone --recurse-submodules https://github.com/user/pylibjxl.git
 cd pylibjxl
-```
-
-```bash
 pip install .
 ```
 
@@ -199,6 +209,8 @@ Encode a NumPy array to JXL bytes.
 | `xmp` | `bytes \| None` | `None` | Raw XMP (XML) metadata to embed |
 | `jumbf` | `bytes \| None` | `None` | Raw JUMBF metadata to embed |
 
+> **Note on EXIF:** `pylibjxl` automatically handles the 4-byte TIFF header offset required by the JXL box format. You should provide raw EXIF bytes starting with the TIFF header (e.g., `II*` or `MM*`).
+
 ---
 
 #### `decode(data, *, metadata=False) → ndarray | tuple[ndarray, dict]`
@@ -236,18 +248,31 @@ Async versions of the above functions — same parameters, returns `Awaitable`.
 
 #### `JXL(effort=7, distance=1.0, lossless=False)`
 
-Synchronous codec context manager with shared defaults.
+Synchronous codec context manager with shared defaults. It maintains a persistent thread pool for better performance across multiple operations.
 
 | Method | Description |
 |--------|-------------|
-| `encode(input, effort=None, distance=None, lossless=None, *, exif=None, xmp=None, jumbf=None)` | Encode in-memory |
-| `decode(data, *, metadata=False)` | Decode in-memory |
-| `read(path, *, metadata=False)` | Read from file |
-| `write(path, image, effort=None, distance=None, lossless=None, *, exif=None, xmp=None, jumbf=None)` | Write to file |
+| `encode(input, ...)` | Encode JXL in-memory (supports per-call overrides) |
+| `decode(data, *, metadata=False)` | Decode JXL in-memory |
+| `read(path, *, metadata=False)` | Read JXL from file |
+| `write(path, image, ...)` | Write JXL to file |
+| `encode_jpeg(input, quality=95)` | Encode JPEG in-memory |
+| `decode_jpeg(data)` | Decode JPEG in-memory |
+| `read_jpeg(path)` | Read JPEG from file |
+| `write_jpeg(path, image, quality=95)` | Write JPEG to file |
+| `jpeg_to_jxl(data, effort=None)` | Lossless JPEG → JXL transcoding |
+| `jxl_to_jpeg(data)` | JXL → JPEG reconstruction |
+| `convert_jpeg_to_jxl(in_path, out_path)` | File-to-file JPEG → JXL |
+| `convert_jxl_to_jpeg(in_path, out_path)` | File-to-file JXL → JPEG |
+| `close()` | Explicitly close and release thread pool |
+
+**Properties:**
+- `closed` (bool): Whether the codec context has been closed.
 
 #### `AsyncJXL(effort=7, distance=1.0, lossless=False)`
 
-Async codec context manager. Methods: `encode_async`, `decode_async`, `read_async`, `write_async`.
+Async codec context manager. Methods are async versions of the above:
+`encode_async`, `decode_async`, `read_async`, `write_async`, `encode_jpeg_async`, `decode_jpeg_async`, `read_jpeg_async`, `write_jpeg_async`, `jpeg_to_jxl_async`, `jxl_to_jpeg_async`, `convert_jpeg_to_jxl_async`, `convert_jxl_to_jpeg_async`.
 
 ---
 
@@ -276,7 +301,7 @@ Encode and write to a JPEG file. Creates parent directories automatically.
 
 #### `jpeg_to_jxl(data, effort=7) → bytes`
 
-Losslessly recompress JPEG bytes to JXL. Embeds JPEG reconstruction data so the original JPEG can be restored.
+Losslessly recompress JPEG bytes to JXL. This process preserves the original JPEG codestream and metadata (EXIF, XMP, etc.), allowing for bit-perfect restoration of the original JPEG file.
 
 #### `jxl_to_jpeg(data) → bytes`
 
@@ -306,4 +331,4 @@ Reconstruct the original JPEG file from a JXL file. Only works for JPEG-transcod
 
 ## License
 
-MIT
+BSD 3-Clause
