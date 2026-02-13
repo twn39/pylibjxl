@@ -20,6 +20,11 @@ set(WITH_TURBOJPEG ON CACHE BOOL "" FORCE)
 set(WITH_TOOLS OFF CACHE BOOL "" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "" FORCE)
 
+# Fix for Linux LTO: Disable TLS to avoid relocation R_X86_64_TPOFF32 error
+if(UNIX AND NOT APPLE)
+    set(WITH_TLS OFF CACHE BOOL "" FORCE)
+endif()
+
 # Prevent third-party libraries from installing their files into our wheel
 set(SKIP_INSTALL_ALL TRUE)
 set(SKIP_INSTALL_LIBRARIES TRUE)
@@ -50,6 +55,19 @@ else()
 endif()
 
 add_subdirectory(third_party/libjpeg-turbo)
+
+# Fix for Linux LTO: Disable IPO for third-party targets to avoid linkage issues
+if(ipo_supported AND UNIX AND NOT APPLE)
+    if(TARGET turbojpeg-static)
+        set_target_properties(turbojpeg-static PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
+    if(TARGET jpeg-static)
+        set_target_properties(jpeg-static PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
+    if(TARGET simd)
+        set_target_properties(simd PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
+endif()
 
 # Expose libjpeg-turbo to libjxl (mock FindJPEG)
 set(JPEG_FOUND TRUE CACHE BOOL "" FORCE)
