@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pylibjxl"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python bindings for libjxl using pybind11"
 readme = "README.md"
 authors = [
