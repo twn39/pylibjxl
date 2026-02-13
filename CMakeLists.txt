@@ -19,6 +19,28 @@ set(ENABLE_STATIC ON CACHE BOOL "" FORCE)
 set(WITH_TURBOJPEG ON CACHE BOOL "" FORCE)
 set(WITH_TOOLS OFF CACHE BOOL "" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+# Apply patch to libjpeg-turbo
+find_package(Git REQUIRED)
+execute_process(
+    COMMAND ${GIT_EXECUTABLE} apply --check ${CMAKE_CURRENT_SOURCE_DIR}/patches/libjpeg-turbo.patch
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo
+    RESULT_VARIABLE patch_check_result
+    OUTPUT_QUIET ERROR_QUIET
+)
+if(patch_check_result EQUAL 0)
+    message(STATUS "Applying libjpeg-turbo patch...")
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/libjpeg-turbo.patch
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo
+        RESULT_VARIABLE patch_apply_result
+    )
+    if(NOT patch_apply_result EQUAL 0)
+        message(FATAL_ERROR "Failed to apply libjpeg-turbo patch")
+    endif()
+else()
+    message(STATUS "libjpeg-turbo patch seems to be already applied or inapplicable.")
+endif()
+
 add_subdirectory(third_party/libjpeg-turbo)
 
 # Expose libjpeg-turbo to libjxl (mock FindJPEG)
