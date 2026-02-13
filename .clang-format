@@ -1,0 +1,25 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 100
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBraces: Attach
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<pybind11/'
+    Priority: 3
+  - Regex: '^<jxl/'
+    Priority: 2
+  - Regex: '^<'
+    Priority: 1
+  - Regex: '.*'
+    Priority: 4
+SortIncludes: CaseSensitive
+SpaceAfterTemplateKeyword: false
+Standard: c++17
