@@ -1,7 +1,9 @@
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -48,7 +50,26 @@ struct TjFree {
 };
 using TjBufPtr = std::unique_ptr<unsigned char, TjFree>;
 
-// ─── Encode
+// ─── Module-level shared runner for free functions
+// ─────────────────────────────────────────────────
+
+static std::mutex g_runner_mutex;    // NOLINT
+static JxlRunnerPtr g_shared_runner; // NOLINT
+
+static void *get_or_create_shared_runner() {
+  std::lock_guard<std::mutex> lock(g_runner_mutex);
+  if (!g_shared_runner) {
+    g_shared_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
+  }
+  return g_shared_runner.get();
+}
+
+static void destroy_shared_runner() {
+  std::lock_guard<std::mutex> lock(g_runner_mutex);
+  g_shared_runner.reset();
+}
+
+// ─── Encode (internal)
 // ────────────────────────────────────────────────────────────────────
 
 /// Helper: extract raw bytes from an optional py::object (bytes or None).
@@ -63,13 +84,14 @@ static std::vector<uint8_t> extract_optional_bytes(const py::object &obj) {
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage,cppcoreguidelines-avoid-non-const-global-variables)
-py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
-                 int effort = 7,
-                 float distance = 1.0F,
-                 bool lossless = false,
-                 py::object exif = py::none(),
-                 py::object xmp = py::none(),
-                 py::object jumbf = py::none()) {
+static py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
+                             int effort,
+                             float distance,
+                             bool lossless,
+                             py::object exif,
+                             py::object xmp,
+                             py::object jumbf,
+                             void *shared_runner) {
   // ── Input validation (GIL held) ──
   auto buf = input.request();
   if (buf.ndim != 3) {
@@ -104,11 +126,14 @@ py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast>
   {
     py::gil_scoped_release release;
 
-    JxlRunnerPtr runner(JxlResizableParallelRunnerCreate(nullptr));
+    // Use shared runner (from context manager) or create a local one per-call
+    JxlRunnerPtr local_runner;
+    void *runner = shared_runner;
     if (!runner) {
-      throw std::runtime_error("JxlResizableParallelRunnerCreate failed");
+      local_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
+      runner = local_runner.get();
     }
-    JxlResizableParallelRunnerSetThreads(runner.get(),
+    JxlResizableParallelRunnerSetThreads(runner,
                                          JxlResizableParallelRunnerSuggestThreads(width, height));
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
@@ -117,7 +142,7 @@ py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast>
     }
 
     if (JXL_ENC_SUCCESS !=
-        JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner.get())) {
+        JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
       throw std::runtime_error("JxlEncoderSetParallelRunner failed");
     }
 
@@ -232,11 +257,23 @@ py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast>
   return py::bytes(reinterpret_cast<const char *>(compressed.data()), compressed.size());
 }
 
-// ─── Decode
+// Public free function wrapper
+// NOLINTNEXTLINE(misc-use-internal-linkage,cppcoreguidelines-avoid-non-const-global-variables)
+static py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
+                        int effort = 7,
+                        float distance = 1.0F,
+                        bool lossless = false,
+                        py::object exif = py::none(),
+                        py::object xmp = py::none(),
+                        py::object jumbf = py::none()) {
+  return encode_impl(input, effort, distance, lossless, exif, xmp, jumbf, nullptr);
+}
+
+// ─── Decode (internal)
 // ────────────────────────────────────────────────────────────────────
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,misc-use-internal-linkage)
-py::object decode(py::bytes data, bool metadata = false) {
+static py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
   // ── Extract pointer without copying (GIL held) ──
   char *raw_ptr = nullptr; // NOLINT(misc-const-correctness) — PyBytes API requires non-const
   Py_ssize_t raw_size = 0;
@@ -297,12 +334,15 @@ py::object decode(py::bytes data, bool metadata = false) {
   {
     py::gil_scoped_release release;
 
-    JxlRunnerPtr runner(JxlResizableParallelRunnerCreate(nullptr));
+    // Use shared runner (from context manager) or create a local one per-call
+    JxlRunnerPtr local_runner;
+    void *runner = shared_runner;
     if (!runner) {
-      throw std::runtime_error("JxlResizableParallelRunnerCreate failed");
+      local_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
+      runner = local_runner.get();
     }
     JxlResizableParallelRunnerSetThreads(
-        runner.get(), JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
+        runner, JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
     if (!dec) {
@@ -310,7 +350,7 @@ py::object decode(py::bytes data, bool metadata = false) {
     }
 
     if (JXL_DEC_SUCCESS !=
-        JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner.get())) {
+        JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner)) {
       throw std::runtime_error("JxlDecoderSetParallelRunner failed");
     }
 
@@ -426,6 +466,12 @@ py::object decode(py::bytes data, bool metadata = false) {
   return py::make_tuple(result, meta);
 }
 
+// Public free function wrapper
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+static py::object decode(py::bytes data, bool metadata = false) {
+  return decode_impl(data, metadata, nullptr);
+}
+
 // ─── JPEG Codec (TurboJPEG)
 // ──────────────────────────────────────────────────────────
 
@@ -458,11 +504,7 @@ py::bytes encode_jpeg(py::array_t<uint8_t, py::array::c_style | py::array::force
     }
 
     int pixel_format = (channels == 3) ? TJPF_RGB : TJPF_RGBA;
-    int subsamp = (channels == 3)
-                      ? TJSAMP_444
-                      : TJSAMP_444; // For RGBA, alpha is dropped, so treat as RGB for subsampling
-    // tjCompress2 takes output subsampling.
-    // If input is RGBA, we can compress to YCbCr (RGB) and drop alpha.
+    int subsamp = TJSAMP_444;
 
     if (tjCompress2(compressor.get(),
                     static_cast<const unsigned char *>(buf.ptr),
@@ -496,7 +538,12 @@ py::array_t<uint8_t> decode_jpeg(py::bytes data) {
   const auto *jpeg_data = reinterpret_cast<const unsigned char *>(raw_ptr);
   const auto jpeg_size = static_cast<unsigned long>(raw_size); // NOLINT
 
-  int width = 0, height = 0, subsamp = 0, colorspace = 0;
+  int width = 0;
+  int height = 0;
+  int subsamp = 0;
+  int colorspace = 0;
+
+  // Read header with GIL released to get dimensions
   {
     py::gil_scoped_release release;
     TjPtr decompressor(tjInitDecompress());
@@ -512,13 +559,16 @@ py::array_t<uint8_t> decode_jpeg(py::bytes data) {
   }
 
   // Allocate result (GIL held)
-  // We'll output RGB (3 channels) by default.
   py::array_t<uint8_t> result({height, width, 3});
   auto buf = result.request();
 
+  // Decompress with GIL released
   {
     py::gil_scoped_release release;
     TjPtr decompressor(tjInitDecompress());
+    if (!decompressor) {
+      throw std::runtime_error("tjInitDecompress failed");
+    }
     if (tjDecompress2(decompressor.get(),
                       jpeg_data,
                       jpeg_size,
@@ -560,8 +610,13 @@ py::bytes jpeg_to_jxl(py::bytes jpeg_data, int effort = 7) {
       throw std::runtime_error("JxlEncoderCreate failed");
 
     // Use container to allow metadata (exif/xmp) preservation from JPEG
-    if (JXL_ENC_SUCCESS != JxlEncoderUseContainer(enc.get())) {
+    if (JXL_ENC_SUCCESS != JxlEncoderUseContainer(enc.get(), JXL_TRUE)) {
       throw std::runtime_error("JxlEncoderUseContainer failed");
+    }
+
+    // Store JPEG reconstruction data
+    if (JXL_ENC_SUCCESS != JxlEncoderStoreJPEGMetadata(enc.get(), JXL_TRUE)) {
+      throw std::runtime_error("JxlEncoderStoreJPEGMetadata failed");
     }
 
     // Frame settings
@@ -611,53 +666,81 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data) {
   const auto *jxl_ptr = reinterpret_cast<const uint8_t *>(raw_ptr);
   const auto jxl_len = static_cast<size_t>(raw_size);
 
-  std::vector<uint8_t> jpeg_out;
+  std::vector<uint8_t> jpeg_data;
   {
     py::gil_scoped_release release;
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
-    if (!dec)
+    if (!dec) {
       throw std::runtime_error("JxlDecoderCreate failed");
+    }
 
-    if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_JPEG_RECONSTRUCTION)) {
+    // Subscribe to JPEG reconstruction + full image (needed to drive reconstruction)
+    if (JXL_DEC_SUCCESS !=
+        JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_JPEG_RECONSTRUCTION | JXL_DEC_FULL_IMAGE)) {
       throw std::runtime_error("JxlDecoderSubscribeEvents failed");
     }
 
     JxlDecoderSetInput(dec.get(), jxl_ptr, jxl_len);
     JxlDecoderCloseInput(dec.get());
 
-    std::vector<uint8_t> buffer(jxl_len * 2 + 16384); // Initial guess
-    bool reconstruction_found = false;
+    constexpr size_t kInitialSize = 4096;
+    jpeg_data.resize(kInitialSize);
+    size_t jpeg_pos = 0; // bytes of JPEG data written so far
 
-    for (;;) {
+    bool reconstruction_seen = false;
+
+    while (true) {
       JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
+
       if (status == JXL_DEC_ERROR) {
-        throw std::runtime_error("Decoder error");
+        throw std::runtime_error("JxlDecoderProcessInput failed with JXL_DEC_ERROR");
+      }
+      if (status == JXL_DEC_SUCCESS) {
+        // Finalize: release remaining buffer and trim
+        if (reconstruction_seen) {
+          size_t remaining = JxlDecoderReleaseJPEGBuffer(dec.get());
+          jpeg_pos = jpeg_data.size() - remaining;
+        }
+        break;
       }
       if (status == JXL_DEC_JPEG_RECONSTRUCTION) {
-        reconstruction_found = true;
-        // Provide buffer
-        if (JXL_DEC_SUCCESS != JxlDecoderSetJPEGBuffer(dec.get(), buffer.data(), buffer.size())) {
+        reconstruction_seen = true;
+        // Set initial output buffer
+        if (JXL_DEC_SUCCESS !=
+            JxlDecoderSetJPEGBuffer(dec.get(), jpeg_data.data(), jpeg_data.size())) {
           throw std::runtime_error("JxlDecoderSetJPEGBuffer failed");
         }
-      } else if (status == JXL_DEC_SUCCESS) {
-        size_t remaining = JxlDecoderReleaseJPEGBuffer(dec.get());
-        size_t used = buffer.size() - remaining;
-        jpeg_out.assign(buffer.data(), buffer.data() + used);
-        break;
-      } else if (status == JXL_DEC_NEED_MORE_INPUT) {
-        throw std::runtime_error("Truncated JXL data");
-      } else if (status == JXL_DEC_FULL_IMAGE) {
-        // If we reached full image without JPEG reconstruction, it means it wasn't a recompressed
-        // JPEG
-        break; // reconstruction_found will be false (or maybe true but finished?)
+        continue;
       }
+      if (status == JXL_DEC_JPEG_NEED_MORE_OUTPUT) {
+        // Release current buffer to find out how much was consumed
+        size_t remaining = JxlDecoderReleaseJPEGBuffer(dec.get());
+        jpeg_pos = jpeg_data.size() - remaining;
+        // Grow buffer
+        jpeg_data.resize(jpeg_data.size() * 2);
+        // Re-set buffer starting from where we left off
+        if (JXL_DEC_SUCCESS != JxlDecoderSetJPEGBuffer(dec.get(),
+                                                       jpeg_data.data() + jpeg_pos,
+                                                       jpeg_data.size() - jpeg_pos)) {
+          throw std::runtime_error("JxlDecoderSetJPEGBuffer failed after resize");
+        }
+        continue;
+      }
+      if (status == JXL_DEC_FULL_IMAGE) {
+        continue; // Keep going to get JXL_DEC_SUCCESS
+      }
+      // Any other status (e.g. JXL_DEC_NEED_IMAGE_OUT_BUFFER) means no JPEG
+      // reconstruction is available — break to avoid infinite loop
+      break;
     }
 
-    if (!reconstruction_found || jpeg_out.empty()) {
+    if (!reconstruction_seen) {
       throw std::runtime_error("JXL data does not contain a reconstructible JPEG codestream");
     }
+
+    jpeg_data.resize(jpeg_pos);
   }
-  return py::bytes(reinterpret_cast<const char *>(jpeg_out.data()), jpeg_out.size());
+  return py::bytes(reinterpret_cast<const char *>(jpeg_data.data()), jpeg_data.size());
 }
 
 // ─── Unified Codec Context Manager
@@ -669,6 +752,10 @@ public:
   PyJxlCodec(int effort = 7, float distance = 1.0F, bool lossless = false)
       : effort_(std::clamp(effort, 1, 10)),
         distance_(lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F)), lossless_(lossless) {}
+
+  ~PyJxlCodec() { close(); }
+
+  // ── JXL encode/decode ──
 
   /// Encode an image, with optional per-call overrides and metadata.
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
@@ -683,17 +770,50 @@ public:
     int eff = effort.value_or(effort_);
     bool ll = lossless.value_or(lossless_);
     float dist = distance.value_or(ll ? 0.0F : distance_);
-    return encode(input, eff, dist, ll, exif, xmp, jumbf);
+    return encode_impl(input, eff, dist, ll, exif, xmp, jumbf, runner_.get());
   }
 
   /// Decode JXL bytes, optionally extracting metadata.
   py::object decode_image(py::bytes data, bool metadata) {
     check_closed();
-    return decode(data, metadata);
+    return decode_impl(data, metadata, runner_.get());
   }
+
+  // ── JPEG encode/decode ──
+
+  py::bytes encode_jpeg_image(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
+                              int quality) {
+    check_closed();
+    return encode_jpeg(input, quality);
+  }
+
+  py::array_t<uint8_t> decode_jpeg_image(py::bytes data) {
+    check_closed();
+    return decode_jpeg(data);
+  }
+
+  // ── JXL <-> JPEG transcoding ──
+
+  py::bytes jpeg_to_jxl_image(py::bytes jpeg_data, std::optional<int> effort) {
+    check_closed();
+    return jpeg_to_jxl(jpeg_data, effort.value_or(effort_));
+  }
+
+  py::bytes jxl_to_jpeg_image(py::bytes jxl_data) {
+    check_closed();
+    return jxl_to_jpeg(jxl_data);
+  }
+
+  // ── Context manager ──
 
   PyJxlCodec &enter() {
     check_closed();
+    if (!runner_) {
+      runner_.reset(JxlResizableParallelRunnerCreate(nullptr));
+      if (!runner_) {
+        throw std::runtime_error("JxlResizableParallelRunnerCreate failed");
+      }
+    }
     return *this;
   }
 
@@ -703,7 +823,11 @@ public:
     close();
   }
 
-  void close() { closed_ = true; }
+  void close() {
+    runner_.reset(); // Destroy thread pool deterministically
+    closed_ = true;
+  }
+
   [[nodiscard]] bool closed() const { return closed_; }
 
 private:
@@ -713,6 +837,7 @@ private:
     }
   }
 
+  JxlRunnerPtr runner_;
   int effort_;
   float distance_;
   bool lossless_;
@@ -724,6 +849,10 @@ private:
 
 PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
   m.doc() = "Python bindings for libjxl";
+
+  // Register atexit cleanup for shared runner
+  auto atexit = py::module_::import("atexit");
+  atexit.attr("register")(py::cpp_function([]() { destroy_shared_runner(); }));
 
   m.def(
       "version",
@@ -770,13 +899,20 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
   // ── Unified JXL codec context manager ──
   py::class_<PyJxlCodec>(m,
                          "JXL",
-                         "Unified JXL codec with context manager support.\n\n"
-                         "Provides both encode() and decode() in a single context.\n\n"
+                         "Unified JXL/JPEG codec with context manager support.\n\n"
+                         "Owns a shared thread pool that is destroyed on close().\n"
+                         "Supports JXL encode/decode, JPEG encode/decode, and\n"
+                         "cross-format transcoding.\n\n"
                          "Usage:\n"
                          "    with pylibjxl.JXL(effort=7) as jxl:\n"
                          "        data = jxl.encode(image)\n"
-                         "        image = jxl.decode(data)\n")
+                         "        image = jxl.decode(data)\n"
+                         "        jpeg = jxl.encode_jpeg(image)\n"
+                         "        img = jxl.decode_jpeg(jpeg)\n"
+                         "        jxl_data = jxl.jpeg_to_jxl(jpeg)\n"
+                         "        jpeg_back = jxl.jxl_to_jpeg(jxl_data)\n")
       .def(py::init<int, float, bool>(), "effort"_a = 7, "distance"_a = 1.0F, "lossless"_a = false)
+      // JXL encode/decode
       .def("encode",
            &PyJxlCodec::encode_image,
            "Encode a numpy array to JXL bytes.\n\n"
@@ -793,12 +929,33 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
            "Decode JXL bytes, optionally extracting metadata.",
            "data"_a,
            "metadata"_a = false)
-      .def("close", &PyJxlCodec::close, "Close the codec, preventing further use.")
+      // JPEG encode/decode
+      .def("encode_jpeg",
+           &PyJxlCodec::encode_jpeg_image,
+           "Encode numpy array to JPEG bytes (uses libjpeg-turbo).",
+           "input"_a,
+           "quality"_a = 95)
+      .def("decode_jpeg",
+           &PyJxlCodec::decode_jpeg_image,
+           "Decode JPEG bytes to numpy array (H, W, 3).",
+           "data"_a)
+      // Cross-format transcoding
+      .def("jpeg_to_jxl",
+           &PyJxlCodec::jpeg_to_jxl_image,
+           "Losslessly recompress JPEG bytes to JXL bytes.",
+           "data"_a,
+           "effort"_a = py::none())
+      .def("jxl_to_jpeg",
+           &PyJxlCodec::jxl_to_jpeg_image,
+           "Reconstruct original JPEG bytes from JXL bytes.",
+           "data"_a)
+      // Lifecycle
+      .def("close", &PyJxlCodec::close, "Close the codec and release thread pool resources.")
       .def_property_readonly("closed", &PyJxlCodec::closed, "Whether the codec has been closed.")
       .def("__enter__", &PyJxlCodec::enter, py::return_value_policy::reference)
       .def("__exit__", &PyJxlCodec::exit);
 
-  // ─── JPEG & Transcoding ───
+  // ─── JPEG & Transcoding free functions ───
   m.def("encode_jpeg",
         &encode_jpeg,
         "Encode numpy array to JPEG bytes (using libjpeg-turbo).\n"

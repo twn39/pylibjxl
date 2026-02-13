@@ -17,6 +17,8 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(ENABLE_SHARED OFF CACHE BOOL "" FORCE)
 set(ENABLE_STATIC ON CACHE BOOL "" FORCE)
 set(WITH_TURBOJPEG ON CACHE BOOL "" FORCE)
+set(WITH_TOOLS OFF CACHE BOOL "" FORCE)
+set(WITH_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/libjpeg-turbo)
 
 # Expose libjpeg-turbo to libjxl (mock FindJPEG)
@@ -29,6 +31,7 @@ set(JPEG_LIBRARY ${JPEG_LIBRARIES} CACHE STRING "" FORCE)
 set(JPEG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo/src" CACHE PATH "" FORCE)
 
 # Configure libjxl options
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
 set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(JPEGXL_ENABLE_MANPAGES OFF CACHE BOOL "" FORCE)
@@ -53,12 +56,13 @@ find_package(pybind11 REQUIRED)
 pybind11_add_module(_pylibjxl src/main.cpp)
 
 # Link with libjxl and turbojpeg
-target_link_libraries(_pylibjxl PRIVATE jxl jxl_threads turbojpeg-static)
+# Ensure headers are found globally
+include_directories(
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo/src"
+    "${CMAKE_CURRENT_BINARY_DIR}/third_party/libjpeg-turbo"
+)
 
-# Add includes for turbojpeg.h
-target_include_directories(_pylibjxl PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo"
-    "${CMAKE_CURRENT_BINARY_DIR}/third_party/libjpeg-turbo")
+target_link_libraries(_pylibjxl PRIVATE jxl jxl_threads turbojpeg-static)
 
 # Set target properties
 target_compile_features(_pylibjxl PRIVATE cxx_std_17)

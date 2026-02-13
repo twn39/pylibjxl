@@ -1,6 +1,6 @@
 # pylibjxl
 
-Fast Python bindings for [libjxl](https://github.com/libjxl/libjxl) — the JPEG XL reference implementation. Built with [pybind11](https://github.com/pybind/pybind11), with GIL-free encoding/decoding and native async support.
+Fast Python bindings for [libjxl](https://github.com/libjxl/libjxl) and [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo). Built with [pybind11](https://github.com/pybind/pybind11), with GIL-free encoding/decoding and native async support.
 
 ## Features
 
@@ -9,6 +9,7 @@ Fast Python bindings for [libjxl](https://github.com/libjxl/libjxl) — the JPEG
 - ⚡ **Async-first** — Native `asyncio` support for concurrent I/O
 - 🎯 **Simple API** — Free functions for quick use, context managers for control
 - 🖼️ **NumPy native** — Direct `ndarray` input/output (RGB/RGBA, uint8)
+- 🔄 **JPEG support** — Encode/decode JPEG via libjpeg-turbo + lossless JPEG↔JXL transcoding
 
 ## Installation
 
@@ -18,7 +19,7 @@ Fast Python bindings for [libjxl](https://github.com/libjxl/libjxl) — the JPEG
 - CMake ≥ 3.15
 - C++17 compiler (GCC, Clang, MSVC)
 
-> **Note:** libjxl is bundled as a Git submodule in `third_party/libjxl` and statically linked — no system-level installation required.
+> **Note:** libjxl and libjpeg-turbo are bundled as Git submodules in `third_party/` and statically linked — no system-level installation required.
 
 ### Install
 
@@ -126,6 +127,60 @@ async def main():
 asyncio.run(main())
 ```
 
+### JPEG Encode / Decode
+
+```python
+import pylibjxl
+
+# Encode to JPEG (via libjpeg-turbo)
+jpeg_data = pylibjxl.encode_jpeg(image, quality=95)
+
+# Decode JPEG to numpy array
+image = pylibjxl.decode_jpeg(jpeg_data)
+```
+
+### JPEG ↔ JXL Transcoding
+
+```python
+# Losslessly recompress JPEG → JXL (preserves JPEG reconstruction data)
+jxl_data = pylibjxl.jpeg_to_jxl(jpeg_data, effort=7)
+
+# Reconstruct original JPEG from JXL (lossless roundtrip)
+jpeg_restored = pylibjxl.jxl_to_jpeg(jxl_data)
+
+# Async variants
+jxl_data = await pylibjxl.jpeg_to_jxl_async(jpeg_data)
+jpeg_data = await pylibjxl.jxl_to_jpeg_async(jxl_data)
+```
+
+### JPEG File I/O
+
+```python
+# Write JPEG file
+pylibjxl.write_jpeg("photo.jpg", image, quality=95)
+
+# Read JPEG file
+image = pylibjxl.read_jpeg("photo.jpg")
+
+# Async
+await pylibjxl.write_jpeg_async("photo.jpg", image)
+image = await pylibjxl.read_jpeg_async("photo.jpg")
+```
+
+### Cross-Format File Conversion
+
+```python
+# JPEG → JXL (lossless transcoding, preserves JPEG reconstruction data)
+pylibjxl.convert_jpeg_to_jxl("photo.jpg", "photo.jxl")
+
+# JXL → JPEG (lossless reconstruction from transcoded JXL)
+pylibjxl.convert_jxl_to_jpeg("photo.jxl", "restored.jpg")
+
+# Async
+await pylibjxl.convert_jpeg_to_jxl_async("photo.jpg", "photo.jxl")
+await pylibjxl.convert_jxl_to_jpeg_async("photo.jxl", "restored.jpg")
+```
+
 ## API Reference
 
 ### Free Functions
@@ -193,6 +248,51 @@ Synchronous codec context manager with shared defaults.
 #### `AsyncJXL(effort=7, distance=1.0, lossless=False)`
 
 Async codec context manager. Methods: `encode_async`, `decode_async`, `read_async`, `write_async`.
+
+---
+
+### JPEG & Transcoding Functions
+
+#### `encode_jpeg(input, quality=95) → bytes`
+
+Encode a NumPy array to JPEG bytes using libjpeg-turbo.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `input` | `ndarray` | *required* | uint8 array of shape `(H, W, 3)` or `(H, W, 4)` |
+| `quality` | `int` | `95` | JPEG quality `[1-100]` |
+
+#### `decode_jpeg(data) → ndarray`
+
+Decode JPEG bytes to a NumPy array `(H, W, 3)` using libjpeg-turbo.
+
+#### `read_jpeg(path) → ndarray`
+
+Read a `.jpg`/`.jpeg` file from disk. Returns `ndarray` of shape `(H, W, 3)`.
+
+#### `write_jpeg(path, image, quality=95)`
+
+Encode and write to a JPEG file. Creates parent directories automatically.
+
+#### `jpeg_to_jxl(data, effort=7) → bytes`
+
+Losslessly recompress JPEG bytes to JXL. Embeds JPEG reconstruction data so the original JPEG can be restored.
+
+#### `jxl_to_jpeg(data) → bytes`
+
+Reconstruct the original JPEG bytes from a JXL file (only works if the JXL was created via `jpeg_to_jxl`).
+
+#### `convert_jpeg_to_jxl(jpeg_path, jxl_path, effort=7)`
+
+Convert a JPEG file to JXL file via lossless transcoding. Creates parent directories automatically.
+
+#### `convert_jxl_to_jpeg(jxl_path, jpeg_path)`
+
+Reconstruct the original JPEG file from a JXL file. Only works for JPEG-transcoded JXL files.
+
+#### Async variants
+
+`encode_jpeg_async`, `decode_jpeg_async`, `read_jpeg_async`, `write_jpeg_async`, `jpeg_to_jxl_async`, `jxl_to_jpeg_async`, `convert_jpeg_to_jxl_async`, `convert_jxl_to_jpeg_async` — same parameters, returns `Awaitable`.
 
 ---
 
