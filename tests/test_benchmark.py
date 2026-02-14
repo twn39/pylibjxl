@@ -1,6 +1,14 @@
+import io
 from pathlib import Path
 
+import numpy as np
 import pytest
+from PIL import Image
+
+try:
+    import pillow_jxl
+except ImportError:
+    pillow_jxl = None
 
 import pylibjxl
 
@@ -37,9 +45,36 @@ def test_benchmark_jxl_encode(benchmark, sample_image):
     benchmark(pylibjxl.encode, sample_image, effort=3)
 
 
+def test_benchmark_pillow_jxl_plugin_encode(benchmark, sample_image):
+    """Benchmark JXL encoding with pillow-jxl-plugin."""
+    if pillow_jxl is None:
+        pytest.skip("pillow-jxl-plugin not installed")
+    pil_img = Image.fromarray(sample_image)
+
+    def _encode():
+        buf = io.BytesIO()
+        # effort=3 in pylibjxl is roughly speed=7 in pillow-jxl
+        pil_img.save(buf, format="JXL", speed=7, distance=1.0)
+        return buf.getvalue()
+
+    benchmark(_encode)
+
+
 def test_benchmark_jxl_decode(benchmark, sample_jxl):
     """Benchmark JXL decoding."""
     benchmark(pylibjxl.decode, sample_jxl)
+
+
+def test_benchmark_pillow_jxl_plugin_decode(benchmark, sample_jxl):
+    """Benchmark JXL decoding with pillow-jxl-plugin."""
+    if pillow_jxl is None:
+        pytest.skip("pillow-jxl-plugin not installed")
+
+    def _decode():
+        img = Image.open(io.BytesIO(sample_jxl))
+        return np.array(img)
+
+    benchmark(_decode)
 
 
 def test_benchmark_jpeg_encode(benchmark, sample_image):
@@ -47,9 +82,31 @@ def test_benchmark_jpeg_encode(benchmark, sample_image):
     benchmark(pylibjxl.encode_jpeg, sample_image, quality=90)
 
 
+def test_benchmark_pillow_jpeg_encode(benchmark, sample_image):
+    """Benchmark JPEG encoding with Pillow."""
+    pil_img = Image.fromarray(sample_image)
+
+    def _encode():
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+
+    benchmark(_encode)
+
+
 def test_benchmark_jpeg_decode(benchmark, sample_jpeg):
     """Benchmark JPEG decoding."""
     benchmark(pylibjxl.decode_jpeg, sample_jpeg)
+
+
+def test_benchmark_pillow_jpeg_decode(benchmark, sample_jpeg):
+    """Benchmark JPEG decoding with Pillow."""
+
+    def _decode():
+        img = Image.open(io.BytesIO(sample_jpeg))
+        return np.array(img)
+
+    benchmark(_decode)
 
 
 def test_benchmark_jpeg_to_jxl(benchmark, sample_jpeg):
@@ -65,10 +122,42 @@ def test_benchmark_jxl_to_jpeg_reconstruction(benchmark, sample_jpeg):
     benchmark(pylibjxl.jxl_to_jpeg, jxl)
 
 
-@pytest.mark.parametrize("effort", [1, 3, 7])
-def test_benchmark_jxl_encode_effort(benchmark, sample_image, effort):
-    """Benchmark JXL encoding with different effort levels."""
-    benchmark(pylibjxl.encode, sample_image, effort=effort)
+@pytest.mark.parametrize("effort_level", [
+    (1, 9, "fast"),
+    (4, 6, "medium"),
+    (7, 3, "slow")
+])
+def test_benchmark_jxl_encode_comparison(benchmark, sample_image, effort_level):
+    """Compare pylibjxl vs pillow-jxl-plugin at different effort levels."""
+    pylib_effort, pillow_speed, label = effort_level
+    
+    def _pylib():
+        return pylibjxl.encode(sample_image, effort=pylib_effort)
+    
+    benchmark.extra_info['effort'] = pylib_effort
+    benchmark.extra_info['pillow_speed'] = pillow_speed
+    benchmark(_pylib)
+
+
+@pytest.mark.parametrize("effort_level", [
+    (1, 9, "fast"),
+    (4, 6, "medium"),
+    (7, 3, "slow")
+])
+def test_benchmark_pillow_jxl_plugin_encode_comparison(benchmark, sample_image, effort_level):
+    """Benchmark pillow-jxl-plugin at different speed levels."""
+    if pillow_jxl is None:
+        pytest.skip("pillow-jxl-plugin not installed")
+    pylib_effort, pillow_speed, label = effort_level
+    pil_img = Image.fromarray(sample_image)
+
+    def _pillow():
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JXL", speed=pillow_speed)
+        return buf.getvalue()
+
+    benchmark.extra_info['speed'] = pillow_speed
+    benchmark(_pillow)
 
 
 # --- File I/O Benchmarks ---
@@ -107,6 +196,17 @@ def test_benchmark_jpeg_write(benchmark, sample_image, tmp_path):
     benchmark(_write)
 
 
+def test_benchmark_pillow_jpeg_write(benchmark, sample_image, tmp_path):
+    """Benchmark writing JPEG to file with Pillow."""
+    output_path = tmp_path / "bench_pillow.jpg"
+    pil_img = Image.fromarray(sample_image)
+
+    def _write():
+        pil_img.save(output_path, quality=90)
+
+    benchmark(_write)
+
+
 def test_benchmark_jpeg_read(benchmark, sample_image, tmp_path):
     """Benchmark reading JPEG from file."""
     input_path = tmp_path / "bench_read.jpg"
@@ -114,5 +214,18 @@ def test_benchmark_jpeg_read(benchmark, sample_image, tmp_path):
 
     def _read():
         pylibjxl.read_jpeg(input_path)
+
+    benchmark(_read)
+
+
+def test_benchmark_pillow_jpeg_read(benchmark, sample_image, tmp_path):
+    """Benchmark reading JPEG from file with Pillow."""
+    input_path = tmp_path / "bench_read_pillow.jpg"
+    pil_img = Image.fromarray(sample_image)
+    pil_img.save(input_path, quality=90)
+
+    def _read():
+        img = Image.open(input_path)
+        return np.array(img)
 
     benchmark(_read)

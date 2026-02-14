@@ -112,6 +112,28 @@ with pylibjxl.JXL(effort=7) as jxl:
 
 ---
 
+## 📈 Performance & Stability
+
+`pylibjxl` is designed for high-throughput production environments:
+
+- **GIL-Free**: C++ core releases the Global Interpreter Lock during encoding/decoding, enabling true multi-core parallelism via Python's `threading` or `asyncio`.
+- **Memory Efficient**: Uses `libjxl`'s internal memory management and pre-allocates buffers to minimize reallocations. 
+- **Stable Throughput**: Benchmarks show consistent timing with very low jitter (Standard Deviation < 1ms for decoding) over thousands of operations.
+- **Thread Pool Reuse**: Using the `JXL` context manager prevents the overhead of creating/destroying thread pools for every operation, providing an additional ~15% speedup in batch processing.
+
+### Benchmark (1440x960 RGB)
+| Library | Task | Mean Time |
+|:---|:---|:---|
+| **pylibjxl** | **JXL Encode (effort 3)** | **23.5 ms** |
+| pillow-jxl-plugin | JXL Encode (speed 7) | 96.7 ms |
+| **pylibjxl** | **JXL Decode** | **10.8 ms** |
+| pillow-jxl-plugin | JXL Decode | 11.6 ms |
+
+> [!NOTE]
+> During benchmarking, we discovered that `pillow-jxl-plugin`'s `speed` parameter appears to be ineffective: varying it does not change the encoding time or the output file size. In contrast, `pylibjxl`'s `effort` parameter works correctly, providing a real trade-off between speed and compression.
+
+---
+
 ## 📂 API Reference
 
 ### 🖼️ JXL In-Memory Operations
