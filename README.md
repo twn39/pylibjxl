@@ -120,19 +120,19 @@ with pylibjxl.JXL(effort=7) as jxl:
 *Tested on Apple M2 Pro (1440x960 RGB Image)*
 
 #### JXL Encoding (pylibjxl vs. pillow-jxl-plugin)
-Both libraries are tested using the same `effort` parameter to ensure a fair comparison.
+Both libraries are tested using the same `effort` parameter (1-11) to ensure a fair comparison. Higher effort results in better compression but slower encoding.
 
 | Effort Level | pylibjxl | pillow-jxl-plugin | Scaling |
 |:---|:---|:---|:---|
-| **Effort 1 (Fastest)** | **~15 ms** | ~13 ms | Low latency |
-| **Effort 4 (Balanced)** | **~26 ms** | ~22 ms | Optimal mix |
-| **Effort 7 (Default)** | **~105 ms** | ~95 ms | Best compression |
+| **Effort 1 (Fastest)** | **~14.1 ms** | ~13.2 ms | Low latency |
+| **Effort 4 (Balanced)** | **~25.4 ms** | ~21.8 ms | Optimal mix |
+| **Effort 7 (Default)** | **~100.8 ms** | ~94.1 ms | Best compression |
 
 #### Decoding Performance
 | Format | pylibjxl | pillow-jxl-plugin / PIL | Improvement |
 |:---|:---|:---|:---|
-| **JXL Decode** | **9.4 ms** | 11.7 ms | **~20% Faster** |
-| **JPEG Decode** | **16.8 ms** | 18.3 ms | **~8% Faster** |
+| **JXL Decode** | **8.8 ms** | 11.9 ms | **~26% Faster** |
+| **JPEG Decode** | **17.0 ms** | 18.2 ms | **~7% Faster** |
 
 ### 🛠️ Architecture Highlights
 
@@ -140,7 +140,7 @@ Both libraries are tested using the same `effort` parameter to ensure a fair com
 - **Native Async Support**: Unlike standard Pillow-based plugins, `pylibjxl` provides native `asyncio` bindings. This prevents event-loop blocking in high-concurrency web servers (e.g., FastAPI, Tornado).
 - **Zero Memory Leaks**: Extensive stability testing (500+ consecutive rounds) shows that memory usage stabilizes after initial warm-up, with no ongoing growth.
 - **Optimized Memory Management**: 
-    - **Pre-allocation**: Uses `JxlEncoderCalculateMaxCompressedSize` to allocate precise buffers, eliminating expensive runtime reallocations.
+    - **Adaptive Buffering**: Employs an intelligent buffer growth strategy during encoding to minimize reallocations while handling high-entropy images.
     - **Runner Reuse**: The `JXL` context manager maintains a persistent thread pool, eliminating the overhead of creating/destroying threads for every call.
 
 > [!IMPORTANT]
