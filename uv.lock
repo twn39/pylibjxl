@@ -1,6 +1,6 @@
 version = 1
 revision = 3
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.15"
 
 [[package]]
 name = "clang-tidy"
@@ -260,7 +260,7 @@ wheels = [
 
 [[package]]
 name = "pylibjxl"
-version = "0.1.0"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -276,7 +276,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "numpy" }]
+requires-dist = [{ name = "numpy", specifier = ">=1.20" }]
 
 [package.metadata.requires-dev]
 dev = [
