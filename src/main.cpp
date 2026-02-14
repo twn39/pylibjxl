@@ -214,13 +214,9 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
       JxlEncoderCloseInput(enc.get());
     }
 
-    // Pre-allocate buffer based on accurate calculation to avoid reallocations
-    size_t max_size = 0;
-    if (JXL_ENC_SUCCESS != JxlEncoderCalculateMaxCompressedSize(enc.get(), &max_size)) {
-      // Fallback if calculation fails
-      max_size = std::max<size_t>(width * height * channels / 2, 4096);
-    }
-    compressed.resize(max_size);
+    // Pre-allocate buffer based on a rough estimate to reduce reallocations during processing
+    const size_t estimated = std::max<size_t>(width * height * channels / 2, 4096);
+    compressed.resize(estimated);
     uint8_t *next_out = compressed.data();
     size_t avail_out = compressed.size();
 

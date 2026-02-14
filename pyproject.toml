@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pylibjxl"
-version = "0.2.0"
+version = "0.2.1"
 description = "Fast Python bindings for libjxl and libjpeg-turbo with GIL-free encoding/decoding and native async support."
 readme = "README.md"
 license = { text = "BSD-3-Clause" }
