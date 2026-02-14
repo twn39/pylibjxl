@@ -122,41 +122,31 @@ def test_benchmark_jxl_to_jpeg_reconstruction(benchmark, sample_jpeg):
     benchmark(pylibjxl.jxl_to_jpeg, jxl)
 
 
-@pytest.mark.parametrize("effort_level", [
-    (1, 9, "fast"),
-    (4, 6, "medium"),
-    (7, 3, "slow")
-])
-def test_benchmark_jxl_encode_comparison(benchmark, sample_image, effort_level):
-    """Compare pylibjxl vs pillow-jxl-plugin at different effort levels."""
-    pylib_effort, pillow_speed, label = effort_level
+@pytest.mark.parametrize("effort", [1, 4, 7])
+def test_benchmark_jxl_encode_comparison(benchmark, sample_image, effort):
+    """Compare pylibjxl vs pillow-jxl-plugin at same effort levels."""
     
     def _pylib():
-        return pylibjxl.encode(sample_image, effort=pylib_effort)
+        return pylibjxl.encode(sample_image, effort=effort)
     
-    benchmark.extra_info['effort'] = pylib_effort
-    benchmark.extra_info['pillow_speed'] = pillow_speed
+    benchmark.extra_info['effort'] = effort
     benchmark(_pylib)
 
 
-@pytest.mark.parametrize("effort_level", [
-    (1, 9, "fast"),
-    (4, 6, "medium"),
-    (7, 3, "slow")
-])
-def test_benchmark_pillow_jxl_plugin_encode_comparison(benchmark, sample_image, effort_level):
-    """Benchmark pillow-jxl-plugin at different speed levels."""
+@pytest.mark.parametrize("effort", [1, 4, 7])
+def test_benchmark_pillow_jxl_plugin_encode_comparison(benchmark, sample_image, effort):
+    """Benchmark pillow-jxl-plugin at same effort levels."""
     if pillow_jxl is None:
         pytest.skip("pillow-jxl-plugin not installed")
-    pylib_effort, pillow_speed, label = effort_level
     pil_img = Image.fromarray(sample_image)
 
     def _pillow():
         buf = io.BytesIO()
-        pil_img.save(buf, format="JXL", speed=pillow_speed)
+        # Correct parameter is 'effort', same as pylibjxl
+        pil_img.save(buf, format="JXL", effort=effort)
         return buf.getvalue()
 
-    benchmark.extra_info['speed'] = pillow_speed
+    benchmark.extra_info['effort'] = effort
     benchmark(_pillow)
 
 
