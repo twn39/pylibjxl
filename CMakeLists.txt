@@ -84,8 +84,8 @@ set(JPEGXL_ENABLE_TRANSCODE_JPEG ON CACHE BOOL "" FORCE)
 # Add libjxl
 add_subdirectory(third_party/libjxl)
 
-# Find pybind11
-find_package(pybind11 REQUIRED)
+# Add pybind11
+add_subdirectory(third_party/pybind11)
 
 # Define the extension module
 pybind11_add_module(_pylibjxl src/main.cpp)
