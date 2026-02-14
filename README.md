@@ -124,13 +124,13 @@ with pylibjxl.JXL(effort=7) as jxl:
 ### Benchmark (1440x960 RGB)
 | Library | Task | Mean Time |
 |:---|:---|:---|
-| **pylibjxl** | **JXL Encode (effort 3)** | **23.5 ms** |
-| pillow-jxl-plugin | JXL Encode (speed 7) | 96.7 ms |
+| **pylibjxl** | **JXL Encode (effort 7)** | **~105 ms** |
+| pillow-jxl-plugin | JXL Encode (effort 7) | ~95 ms |
 | **pylibjxl** | **JXL Decode** | **10.8 ms** |
 | pillow-jxl-plugin | JXL Decode | 11.6 ms |
 
-> [!NOTE]
-> During benchmarking, we discovered that `pillow-jxl-plugin`'s `speed` parameter appears to be ineffective: varying it does not change the encoding time or the output file size. In contrast, `pylibjxl`'s `effort` parameter works correctly, providing a real trade-off between speed and compression.
+> [!TIP]
+> While single-shot synchronous performance is comparable to other implementations, **pylibjxl**'s core strength lies in its **GIL-free** architecture and **native async** support. This ensures your application remains responsive and scales linearly across multiple CPU cores during high-concurrency workloads—something standard Pillow-based plugins cannot achieve due to the Global Interpreter Lock.
 
 ---
 
