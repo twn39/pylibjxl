@@ -51,20 +51,16 @@ struct TjFree {
 };
 using TjBufPtr = std::unique_ptr<unsigned char, TjFree>;
 
-static std::mutex g_runner_mutex;    // NOLINT
-static JxlRunnerPtr g_shared_runner; // NOLINT
+// Use thread_local to provide each thread with its own persistent runner, 
+// avoiding both the overhead of creation/destruction and the contention of a global singleton.
+static thread_local JxlRunnerPtr tl_runner;
 
-void *get_or_create_shared_runner() {
-  std::lock_guard<std::mutex> lock(g_runner_mutex);
-  if (g_shared_runner == nullptr) {
-    g_shared_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
+void *get_thread_local_runner(size_t threads) {
+  if (tl_runner == nullptr) {
+    tl_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
   }
-  return g_shared_runner.get();
-}
-
-void destroy_shared_runner() {
-  std::lock_guard<std::mutex> lock(g_runner_mutex);
-  g_shared_runner.reset();
+  JxlResizableParallelRunnerSetThreads(tl_runner.get(), threads);
+  return tl_runner.get();
 }
 
 std::vector<uint8_t> extract_optional_bytes(const py::object &obj) {
@@ -82,6 +78,7 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
                       int effort,
                       float distance,
                       bool lossless,
+                      int decoding_speed,
                       py::object exif,
                       py::object xmp,
                       py::object jumbf,
@@ -107,7 +104,8 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
   std::vector<uint8_t> jumbf_data = extract_optional_bytes(jumbf);
   const bool has_metadata = !exif_data.empty() || !xmp_data.empty() || !jumbf_data.empty();
 
-  effort = std::clamp(effort, 1, 10);
+  effort = std::clamp(effort, 1, 11);
+  decoding_speed = std::clamp(decoding_speed, 0, 4);
   distance = lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F);
 
   const auto *input_ptr = static_cast<const uint8_t *>(buf.ptr);
@@ -117,14 +115,13 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
   {
     py::gil_scoped_release release;
 
-    JxlRunnerPtr local_runner;
     void *runner = shared_runner;
     if (runner == nullptr) {
-      local_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
-      runner = local_runner.get();
+      runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(width, height));
+    } else {
+      JxlResizableParallelRunnerSetThreads(runner,
+                                           JxlResizableParallelRunnerSuggestThreads(width, height));
     }
-    JxlResizableParallelRunnerSetThreads(runner,
-                                         JxlResizableParallelRunnerSuggestThreads(width, height));
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
     if (enc == nullptr) {
@@ -142,8 +139,15 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
       }
     }
 
+    if (effort > 9) {
+      JxlEncoderAllowExpertOptions(enc.get());
+    }
+
     JxlEncoderFrameSettings *frame_settings = JxlEncoderFrameSettingsCreate(enc.get(), nullptr);
     JxlEncoderFrameSettingsSetOption(frame_settings, JXL_ENC_FRAME_SETTING_EFFORT, effort);
+    JxlEncoderFrameSettingsSetOption(
+        frame_settings, JXL_ENC_FRAME_SETTING_DECODING_SPEED, decoding_speed);
+
     if (lossless) {
       JxlEncoderSetFrameLossless(frame_settings, JXL_TRUE);
     } else {
@@ -244,10 +248,11 @@ py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast>
                  int effort = 7,
                  float distance = 1.0F,
                  bool lossless = false,
+                 int decoding_speed = 0,
                  py::object exif = py::none(),
                  py::object xmp = py::none(),
                  py::object jumbf = py::none()) {
-  return encode_impl(input, effort, distance, lossless, exif, xmp, jumbf, nullptr);
+  return encode_impl(input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, nullptr);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -307,14 +312,14 @@ py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
   {
     py::gil_scoped_release release;
 
-    JxlRunnerPtr local_runner;
     void *runner = shared_runner;
     if (runner == nullptr) {
-      local_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
-      runner = local_runner.get();
+      runner =
+          get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
+    } else {
+      JxlResizableParallelRunnerSetThreads(
+          runner, JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
     }
-    JxlResizableParallelRunnerSetThreads(
-        runner, JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
     if (dec == nullptr) {
@@ -550,15 +555,22 @@ py::bytes jpeg_to_jxl(py::bytes jpeg_data, int effort = 7) {
   const auto *jpeg_ptr = reinterpret_cast<const uint8_t *>(raw_ptr);
   const auto jpeg_len = static_cast<size_t>(raw_size);
 
-  effort = std::clamp(effort, 1, 10);
+  effort = std::clamp(effort, 1, 11);
 
   std::vector<uint8_t> compressed;
   {
     py::gil_scoped_release release;
 
+    void *runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
     if (enc == nullptr)
       throw std::runtime_error("JxlEncoderCreate failed");
+
+    if (JXL_ENC_SUCCESS !=
+        JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
+      throw std::runtime_error("JxlEncoderSetParallelRunner failed");
+    }
 
     if (JXL_ENC_SUCCESS != JxlEncoderUseContainer(enc.get(), JXL_TRUE)) {
       throw std::runtime_error("JxlEncoderUseContainer failed");
@@ -615,9 +627,17 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data) {
   std::vector<uint8_t> jpeg_data;
   {
     py::gil_scoped_release release;
+
+    void *runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
     if (dec == nullptr) {
       throw std::runtime_error("JxlDecoderCreate failed");
+    }
+
+    if (JXL_DEC_SUCCESS !=
+        JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner)) {
+      throw std::runtime_error("JxlDecoderSetParallelRunner failed");
     }
 
     if (JXL_DEC_SUCCESS !=
@@ -684,9 +704,14 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data) {
 class PyJxlCodec {
 public:
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-member-init)
-  PyJxlCodec(int effort = 7, float distance = 1.0F, bool lossless = false)
-      : effort_(std::clamp(effort, 1, 10)),
-        distance_(lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F)), lossless_(lossless) {}
+  PyJxlCodec(int effort = 7,
+             float distance = 1.0F,
+             bool lossless = false,
+             int decoding_speed = 0)
+      : effort_(std::clamp(effort, 1, 11)),
+        distance_(lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F)),
+        lossless_(lossless),
+        decoding_speed_(std::clamp(decoding_speed, 0, 4)) {}
 
   ~PyJxlCodec() { close(); }
 
@@ -700,6 +725,7 @@ public:
                          std::optional<int> effort,
                          std::optional<float> distance,
                          std::optional<bool> lossless,
+                         std::optional<int> decoding_speed,
                          py::object exif,
                          py::object xmp,
                          py::object jumbf) {
@@ -707,7 +733,8 @@ public:
     int eff = effort.value_or(effort_);
     bool ll = lossless.value_or(lossless_);
     float dist = distance.value_or(ll ? 0.0F : distance_);
-    return encode_impl(input, eff, dist, ll, exif, xmp, jumbf, runner_.get());
+    int ds = decoding_speed.value_or(decoding_speed_);
+    return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, runner_.get());
   }
 
   py::object decode_image(py::bytes data, bool metadata) {
@@ -773,6 +800,7 @@ private:
   int effort_;
   float distance_;
   bool lossless_;
+  int decoding_speed_;
   bool closed_ = false;
 };
 
@@ -780,9 +808,6 @@ private:
 
 PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
   m.doc() = "Python bindings for libjxl";
-
-  auto atexit = py::module_::import("atexit");
-  atexit.attr("register")(py::cpp_function([]() { destroy_shared_runner(); }));
 
   m.def(
       "version",
@@ -801,9 +826,10 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
         "Encode a numpy array (H, W, C) to JXL bytes.\n\n"
         "Args:\n"
         "    input: uint8 numpy array of shape (height, width, channels)\n"
-        "    effort: Encoding effort [1-10], higher = slower + smaller (default 7)\n"
+        "    effort: Encoding effort [1-11], higher = slower + smaller (default 7)\n"
         "    distance: Perceptual distance [0.0-25.0], 0 = lossless (default 1.0)\n"
         "    lossless: If True, encode losslessly (default False)\n"
+        "    decoding_speed: Decoding speed tier [0-4], higher = faster to decode (default 0)\n"
         "    exif: Optional EXIF metadata as bytes\n"
         "    xmp: Optional XMP metadata as bytes\n"
         "    jumbf: Optional JUMBF metadata as bytes\n",
@@ -811,6 +837,7 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
         "effort"_a = 7,
         "distance"_a = 1.0F,
         "lossless"_a = false,
+        "decoding_speed"_a = 0,
         "exif"_a = py::none(),
         "xmp"_a = py::none(),
         "jumbf"_a = py::none());
@@ -840,7 +867,11 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
                          "        img = jxl.decode_jpeg(jpeg)\n"
                          "        jxl_data = jxl.jpeg_to_jxl(jpeg)\n"
                          "        jpeg_back = jxl.jxl_to_jpeg(jxl_data)\n")
-      .def(py::init<int, float, bool>(), "effort"_a = 7, "distance"_a = 1.0F, "lossless"_a = false)
+      .def(py::init<int, float, bool, int>(),
+           "effort"_a = 7,
+           "distance"_a = 1.0F,
+           "lossless"_a = false,
+           "decoding_speed"_a = 0)
       .def("encode",
            &PyJxlCodec::encode_image,
            "Encode a numpy array to JXL bytes.\n\n"
@@ -849,6 +880,7 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
            "effort"_a = py::none(),
            "distance"_a = py::none(),
            "lossless"_a = py::none(),
+           "decoding_speed"_a = py::none(),
            "exif"_a = py::none(),
            "xmp"_a = py::none(),
            "jumbf"_a = py::none())

@@ -50,14 +50,30 @@ __all__ = [
 
 
 async def encode_async(
-    input, effort=7, distance=1.0, lossless=False, *, exif=None, xmp=None, jumbf=None
+    input,
+    effort=7,
+    distance=1.0,
+    lossless=False,
+    decoding_speed=0,
+    *,
+    exif=None,
+    xmp=None,
+    jumbf=None,
 ):
     """
     Asynchronously encode a numpy array (H, W, C) to JXL bytes.
     Releases the GIL during the encoding process.
     """
     return await asyncio.to_thread(
-        encode, input, effort, distance, lossless, exif, xmp, jumbf
+        encode,
+        input,
+        effort,
+        distance,
+        lossless,
+        decoding_speed,
+        exif,
+        xmp,
+        jumbf,
     )
 
 
@@ -98,6 +114,7 @@ def write(
     effort=7,
     distance=1.0,
     lossless=False,
+    decoding_speed=0,
     *,
     exif=None,
     xmp=None,
@@ -108,16 +125,19 @@ def write(
     Args:
         path: Output file path (str or Path).
         image: uint8 numpy array of shape (height, width, channels).
-        effort: Encoding effort [1-10] (default 7).
+        effort: Encoding effort [1-11] (default 7).
         distance: Perceptual distance [0.0-25.0] (default 1.0).
         lossless: If True, encode losslessly (default False).
+        decoding_speed: Decoding speed tier [0-4] (default 0).
         exif: Optional EXIF metadata as bytes.
         xmp: Optional XMP metadata as bytes.
         jumbf: Optional JUMBF metadata as bytes.
     """
     filepath = Path(path)
     filepath.parent.mkdir(parents=True, exist_ok=True)
-    data = encode(image, effort, distance, lossless, exif, xmp, jumbf)
+    data = encode(
+        image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf
+    )
     filepath.write_bytes(data)
 
 
@@ -132,6 +152,7 @@ async def write_async(
     effort=7,
     distance=1.0,
     lossless=False,
+    decoding_speed=0,
     *,
     exif=None,
     xmp=None,
@@ -139,7 +160,16 @@ async def write_async(
 ):
     """Asynchronously encode a numpy array and write it to a JXL file."""
     return await asyncio.to_thread(
-        write, path, image, effort, distance, lossless, exif=exif, xmp=xmp, jumbf=jumbf
+        write,
+        path,
+        image,
+        effort,
+        distance,
+        lossless,
+        decoding_speed,
+        exif=exif,
+        xmp=xmp,
+        jumbf=jumbf,
     )
 
 
@@ -181,6 +211,7 @@ class JXL(_JXL):
         effort=None,
         distance=None,
         lossless=None,
+        decoding_speed=None,
         *,
         exif=None,
         xmp=None,
@@ -189,7 +220,9 @@ class JXL(_JXL):
         """Encode a numpy array and write it to a JXL file."""
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        data = self.encode(image, effort, distance, lossless, exif, xmp, jumbf)
+        data = self.encode(
+            image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf
+        )
         filepath.write_bytes(data)
 
     # ── JPEG File I/O ──
@@ -262,6 +295,7 @@ class AsyncJXL(_JXL):
         effort=None,
         distance=None,
         lossless=None,
+        decoding_speed=None,
         *,
         exif=None,
         xmp=None,
@@ -269,7 +303,15 @@ class AsyncJXL(_JXL):
     ):
         """Asynchronously encode a numpy array to JXL bytes."""
         return await asyncio.to_thread(
-            self.encode, input, effort, distance, lossless, exif, xmp, jumbf
+            self.encode,
+            input,
+            effort,
+            distance,
+            lossless,
+            decoding_speed,
+            exif,
+            xmp,
+            jumbf,
         )
 
     async def decode_async(self, data, *, metadata=False):
@@ -284,9 +326,19 @@ class AsyncJXL(_JXL):
         data = await asyncio.to_thread(filepath.read_bytes)
         return await asyncio.to_thread(self.decode, data, metadata)
 
-    async def write_async(self, path, image, effort=None, distance=None, lossless=None):
+    async def write_async(
+        self,
+        path,
+        image,
+        effort=None,
+        distance=None,
+        lossless=None,
+        decoding_speed=None,
+    ):
         """Asynchronously encode and write to a JXL file."""
-        data = await asyncio.to_thread(self.encode, image, effort, distance, lossless)
+        data = await asyncio.to_thread(
+            self.encode, image, effort, distance, lossless, decoding_speed
+        )
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(filepath.write_bytes, data)

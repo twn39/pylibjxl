@@ -14,6 +14,7 @@ def encode(
     effort: int = 7,
     distance: float = 1.0,
     lossless: bool = False,
+    decoding_speed: int = 0,
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
@@ -33,13 +34,14 @@ def jpeg_to_jxl(data: bytes, effort: int = 7) -> bytes: ...
 def jxl_to_jpeg(data: bytes) -> bytes: ...
 
 class _JXL:
-    def __init__(self, effort: int = 7, distance: float = 1.0, lossless: bool = False) -> None: ...
+    def __init__(self, effort: int = 7, distance: float = 1.0, lossless: bool = False, decoding_speed: int = 0) -> None: ...
     def encode(
         self,
         input: npt.NDArray[np.uint8],
         effort: Optional[int] = None,
         distance: Optional[float] = None,
         lossless: Optional[bool] = None,
+        decoding_speed: Optional[int] = None,
         exif: Optional[bytes] = None,
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
@@ -69,6 +71,7 @@ async def encode_async(
     effort: int = 7,
     distance: float = 1.0,
     lossless: bool = False,
+    decoding_speed: int = 0,
     *,
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
@@ -95,6 +98,7 @@ def write(
     effort: int = 7,
     distance: float = 1.0,
     lossless: bool = False,
+    decoding_speed: int = 0,
     *,
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
@@ -114,6 +118,7 @@ async def write_async(
     effort: int = 7,
     distance: float = 1.0,
     lossless: bool = False,
+    decoding_speed: int = 0,
     *,
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
@@ -135,6 +140,7 @@ class JXL(_JXL):
         effort: Optional[int] = None,
         distance: Optional[float] = None,
         lossless: Optional[bool] = None,
+        decoding_speed: Optional[int] = None,
         *,
         exif: Optional[bytes] = None,
         xmp: Optional[bytes] = None,
@@ -157,6 +163,7 @@ class AsyncJXL(_JXL):
         effort: Optional[int] = None,
         distance: Optional[float] = None,
         lossless: Optional[bool] = None,
+        decoding_speed: Optional[int] = None,
         *,
         exif: Optional[bytes] = None,
         xmp: Optional[bytes] = None,
@@ -184,6 +191,7 @@ class AsyncJXL(_JXL):
         effort: Optional[int] = None,
         distance: Optional[float] = None,
         lossless: Optional[bool] = None,
+        decoding_speed: Optional[int] = None,
     ) -> None: ...
 
     async def encode_jpeg_async(self, input: npt.NDArray[np.uint8], quality: int = 95) -> bytes: ...

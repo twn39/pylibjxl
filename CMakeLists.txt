@@ -1,8 +1,15 @@
 cmake_minimum_required(VERSION 3.15)
 project(pylibjxl LANGUAGES C CXX)
 
-# Disable IPO (LTO) for now as it causes relocation issues on Linux with static libs
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+# Enable IPO (LTO) for Apple/Darwin as it's stable there. 
+# For Linux it can cause relocation issues with static libs, so we keep it optional or OFF there.
+if(APPLE)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+else()
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+endif()
+
+add_definitions(-DHWY_COMPILE_ALL_ATTAINABLE)
 
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)

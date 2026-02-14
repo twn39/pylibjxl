@@ -152,16 +152,17 @@ Both libraries are tested using the same `effort` parameter to ensure a fair com
 
 ### 🖼️ JXL In-Memory Operations
 
-#### `encode(input, effort=7, distance=1.0, lossless=False, *, exif=None, xmp=None, jumbf=None) -> bytes`
+#### `encode(input, effort=7, distance=1.0, lossless=False, decoding_speed=0, *, exif=None, xmp=None, jumbf=None) -> bytes`
 #### `async encode_async(...) -> bytes`
 Encodes a NumPy array into JPEG XL format.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `input` | `ndarray` | *required* | uint8 array of shape `(H, W, 3)` or `(H, W, 4)` |
-| `effort` | `int` | `7` | Speed/size tradeoff `[1-10]`. 1=fastest, 10=best compression. |
+| `effort` | `int` | `7` | Speed/size tradeoff `[1-11]`. 1=fastest, 11=best compression. |
 | `distance` | `float` | `1.0` | Perceptual quality `[0.0-25.0]`. 0.0=lossless, 1.0=visually lossless. |
 | `lossless` | `bool` | `False` | If `True`, enables mathematical lossless mode. |
+| `decoding_speed` | `int` | `0` | Decoding speed tier `[0-4]`. 0=default, 4=fastest decoding. |
 | `exif` | `bytes` | `None` | Optional raw EXIF metadata. |
 | `xmp` | `bytes` | `None` | Optional raw XMP (XML) metadata. |
 | `jumbf` | `bytes` | `None` | Optional raw JUMBF metadata. |
@@ -276,7 +277,7 @@ Transcodes raw JPEG bytes into a JPEG XL container losslessly.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `data` | `bytes` | *required* | Original JPEG bytes. |
-| `effort` | `int` | `7` | Transcoding effort `[1-10]`. |
+| `effort` | `int` | `7` | Transcoding effort `[1-11]`. |
 
 ```python
 jxl_data = pylibjxl.jpeg_to_jxl(jpeg_bytes)
@@ -309,7 +310,7 @@ pylibjxl.convert_jxl_to_jpeg("output.jxl", "restored.jpg")
 
 ### 🏗️ Context Managers
 
-#### `JXL(effort=7, distance=1.0, lossless=False)`
+#### `JXL(effort=7, distance=1.0, lossless=False, decoding_speed=0)`
 #### `AsyncJXL(...)`
 Sync and Async context managers that maintain a persistent thread pool.
 
@@ -318,6 +319,7 @@ Sync and Async context managers that maintain a persistent thread pool.
 | `effort` | `int` | `7` | Default effort for operations. |
 | `distance` | `float` | `1.0` | Default distance for operations. |
 | `lossless` | `bool` | `False` | Default lossless mode. |
+| `decoding_speed` | `int` | `0` | Default decoding speed tier. |
 
 ```python
 with pylibjxl.JXL(effort=7) as jxl:
