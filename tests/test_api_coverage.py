@@ -1,8 +1,8 @@
-import asyncio
-import pytest
 import numpy as np
-from pathlib import Path
+import pytest
+
 import pylibjxl
+
 
 class TestJXLClassCoverage:
     """Tests for JXL class methods coverage."""
@@ -49,7 +49,7 @@ class TestJXLClassCoverage:
         with pylibjxl.JXL() as jxl:
             # Create initial JPEG
             jxl.write_jpeg(jpg_path, img, quality=95)
-            
+
             # Convert JPEG -> JXL
             jxl.convert_jpeg_to_jxl(jpg_path, jxl_path)
             assert jxl_path.exists()
@@ -63,9 +63,10 @@ class TestJXLClassCoverage:
             final_img = jxl.read_jpeg(rec_jpg_path)
             assert final_img.shape == img.shape
 
+
 class TestAsyncJXLClassCoverage:
     """Tests for AsyncJXL class methods coverage."""
-    
+
     @pytest.mark.asyncio
     async def test_read_async_file_not_found(self):
         async with pylibjxl.AsyncJXL() as jxl:
@@ -77,7 +78,7 @@ class TestAsyncJXLClassCoverage:
         async with pylibjxl.AsyncJXL() as jxl:
             with pytest.raises(FileNotFoundError):
                 await jxl.read_jpeg_async("non_existent.jpg")
-    
+
     @pytest.mark.asyncio
     async def test_convert_jpeg_async_file_not_found(self):
         async with pylibjxl.AsyncJXL() as jxl:
@@ -104,19 +105,19 @@ class TestAsyncJXLClassCoverage:
     async def test_transcode_async_in_memory(self, real_image_bytes):
         # Create JPEG bytes
         jpeg_data = real_image_bytes
-        
+
         async with pylibjxl.AsyncJXL() as jxl:
             # JPEG bytes -> JXL bytes
             jxl_data = await jxl.jpeg_to_jxl_async(jpeg_data)
             assert len(jxl_data) > 0
-            
+
             # JXL bytes -> JPEG bytes
             rec_jpeg_data = await jxl.jxl_to_jpeg_async(jxl_data)
             assert len(rec_jpeg_data) > 0
             # Should be roughly same size as original (exact reconstruction possible for file, bytes might vary slightly due to headers but jxl reconstruction is usually bit-exact if from jpeg)
             # Actually, `jpeg_to_jxl` and back SHOULD be bit exact for the jpeg stream.
-            
-            assert abs(len(rec_jpeg_data) - len(jpeg_data)) < 2000 # Relaxed check
+
+            assert abs(len(rec_jpeg_data) - len(jpeg_data)) < 2000  # Relaxed check
 
     @pytest.mark.asyncio
     async def test_conversion_async_file(self, tmp_path, sample_image):
@@ -127,10 +128,10 @@ class TestAsyncJXLClassCoverage:
 
         async with pylibjxl.AsyncJXL() as jxl:
             await jxl.write_jpeg_async(jpg_path, img)
-            
+
             await jxl.convert_jpeg_to_jxl_async(jpg_path, jxl_path)
             assert jxl_path.exists()
-            
+
             await jxl.convert_jxl_to_jpeg_async(jxl_path, rec_jpg_path)
             assert rec_jpg_path.exists()
 
@@ -142,34 +143,35 @@ class TestAsyncJXLClassCoverage:
             data = await jxl.encode_jpeg_async(img, quality=85)
             assert isinstance(data, bytes)
             assert len(data) > 0
-            
+
             # Test decode_jpeg_async
             decoded = await jxl.decode_jpeg_async(data)
             assert decoded.shape == img.shape
             assert decoded.dtype == np.uint8
 
+
 class TestFreeFunctionsCoverage:
     """Tests for free function coverage that might be missed."""
-    
+
     @pytest.mark.asyncio
     async def test_free_jpeg_to_jxl_async(self, real_image_bytes):
         jpeg_data = real_image_bytes
         jxl_data = await pylibjxl.jpeg_to_jxl_async(jpeg_data)
         assert len(jxl_data) > 0
-        
+
         rec_jpeg = await pylibjxl.jxl_to_jpeg_async(jxl_data)
         assert len(rec_jpeg) > 0
 
     @pytest.mark.asyncio
     async def test_free_convert_async_files(self, tmp_path, sample_image):
-         img = sample_image
-         jpg_path = tmp_path / "free_async.jpg"
-         jxl_path = tmp_path / "free_async.jxl"
-         rec_path = tmp_path / "free_rec.jpg"
-         
-         await pylibjxl.write_jpeg_async(jpg_path, img)
-         await pylibjxl.convert_jpeg_to_jxl_async(jpg_path, jxl_path)
-         assert jxl_path.exists()
-         
-         await pylibjxl.convert_jxl_to_jpeg_async(jxl_path, rec_path)
-         assert rec_path.exists()
+        img = sample_image
+        jpg_path = tmp_path / "free_async.jpg"
+        jxl_path = tmp_path / "free_async.jxl"
+        rec_path = tmp_path / "free_rec.jpg"
+
+        await pylibjxl.write_jpeg_async(jpg_path, img)
+        await pylibjxl.convert_jpeg_to_jxl_async(jpg_path, jxl_path)
+        assert jxl_path.exists()
+
+        await pylibjxl.convert_jxl_to_jpeg_async(jxl_path, rec_path)
+        assert rec_path.exists()

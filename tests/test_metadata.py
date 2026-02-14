@@ -2,13 +2,31 @@
 
 import numpy as np
 import pytest
+
 import pylibjxl
 
+# ─── Descriptive metadata payloads ──────────────────────────────────────────────
 
-# ─── Synthetic metadata payloads ────────────────────────────────────────────────
+# EXIF containing: Make=GeminiCamera, Model=CLI-v1, Software=pylibjxl-test, FNumber=2.8
+EXIF_PAYLOAD = bytes.fromhex(
+    "4578696600004d4d002a000000080004010f00020000000d0000003e0110000200000007"
+    "0000004c013100020000000e00000054829d000c00000001000000620000000047656d"
+    "696e6943616d6572610000434c492d7631000070796c69626a786c2d74657374004006"
+    "666666666666"
+)
 
-EXIF_PAYLOAD = b"Exif\x00\x00II*\x00\x08\x00\x00\x00"  # minimal EXIF header
-XMP_PAYLOAD = b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta></x:xmpmeta>'
+# Descriptive XMP
+XMP_PAYLOAD = (
+    b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+    b'<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+    b'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+    b'<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+    b"<dc:description>Testing pylibjxl metadata preservation</dc:description>"
+    b"<dc:creator>Gemini CLI</dc:creator>"
+    b'</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>'
+)
+
+# Synthetic JUMBF payload
 JUMBF_PAYLOAD = b"\x00\x00\x00\x1fjumb\x00\x00\x00\x11jumd\x00\x11\x00\x10"
 
 

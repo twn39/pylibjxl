@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
+
 import pylibjxl
 
 # ─── JPEG File I/O ──────────────────────────────────────────────────────────────
+
 
 class TestJpegFileIO:
     def test_write_read_roundtrip(self, tmp_path, sample_image):
@@ -45,6 +47,7 @@ class TestAsyncJpegFileIO:
 
 
 # ─── Cross-Format Conversion ────────────────────────────────────────────────────
+
 
 class TestCrossFormatConversion:
     def test_jpeg_to_jxl_conversion(self, tmp_path, sample_image):

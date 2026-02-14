@@ -1,7 +1,10 @@
-import pytest
 from pathlib import Path
-import pylibjxl
+
 import numpy as np
+import pytest
+
+import pylibjxl
+
 
 @pytest.fixture(scope="session")
 def real_image_path():
@@ -12,15 +15,18 @@ def real_image_path():
         pytest.skip(f"Test image not found: {path}")
     return path
 
+
 @pytest.fixture(scope="session")
 def real_image_bytes(real_image_path):
     """Bytes of the real test image."""
     return real_image_path.read_bytes()
 
+
 @pytest.fixture(scope="session")
 def sample_image(real_image_bytes):
     """Decoded numpy array of the test image (RGB)."""
     return pylibjxl.decode_jpeg(real_image_bytes)
+
 
 @pytest.fixture(scope="session")
 def sample_image_rgba(sample_image):

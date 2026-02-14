@@ -1,6 +1,8 @@
 import numpy as np
-import pylibjxl
 import pytest
+
+import pylibjxl
+
 
 class TestJXL:
     def test_encode_decode_roundtrip(self, sample_image):
@@ -20,7 +22,7 @@ class TestJXL:
         img1 = sample_image
         # Create a second image by flipping the first one
         img2 = np.ascontiguousarray(np.flipud(sample_image))
-        
+
         with pylibjxl.JXL(effort=4) as jxl:
             d1 = jxl.encode(img1, lossless=True)
             d2 = jxl.encode(img2, lossless=True)
@@ -77,7 +79,7 @@ class TestAsyncJXL:
     async def test_async_multiple_operations(self, sample_image):
         img1 = sample_image
         img2 = np.ascontiguousarray(np.flipud(sample_image))
-        
+
         async with pylibjxl.AsyncJXL(effort=4) as jxl:
             d1 = await jxl.encode_async(img1, lossless=True)
             d2 = await jxl.encode_async(img2, lossless=True)

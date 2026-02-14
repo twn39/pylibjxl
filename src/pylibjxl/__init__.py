@@ -1,18 +1,19 @@
 import asyncio
-import os
 from pathlib import Path
 
-from ._pylibjxl import (
-    version,
-    decoder_version,
-    encoder_version,
-    encode,
-    decode,
+from ._pylibjxl import (  # type: ignore
     JXL as _JXL,
-    encode_jpeg,
+)
+from ._pylibjxl import (  # type: ignore
+    decode,
     decode_jpeg,
+    decoder_version,
+    encode,
+    encode_jpeg,
+    encoder_version,
     jpeg_to_jxl,
     jxl_to_jpeg,
+    version,
 )
 
 __all__ = [
@@ -48,9 +49,6 @@ __all__ = [
 ]
 
 
-# ─── Free Functions: In-Memory ──────────────────────────────────────────────────
-
-
 async def encode_async(
     input, effort=7, distance=1.0, lossless=False, *, exif=None, xmp=None, jumbf=None
 ):
@@ -71,9 +69,6 @@ async def decode_async(data, *, metadata=False):
     When metadata=True, returns (array, dict) with extracted metadata.
     """
     return await asyncio.to_thread(decode, data, metadata)
-
-
-# ─── Free Functions: File I/O ───────────────────────────────────────────────────
 
 
 def read(path, *, metadata=False):
@@ -98,7 +93,15 @@ def read(path, *, metadata=False):
 
 
 def write(
-    path, image, effort=7, distance=1.0, lossless=False, *, exif=None, xmp=None, jumbf=None
+    path,
+    image,
+    effort=7,
+    distance=1.0,
+    lossless=False,
+    *,
+    exif=None,
+    xmp=None,
+    jumbf=None,
 ):
     """Encode a numpy array and write it to a JXL file.
 
@@ -124,15 +127,20 @@ async def read_async(path, *, metadata=False):
 
 
 async def write_async(
-    path, image, effort=7, distance=1.0, lossless=False, *, exif=None, xmp=None, jumbf=None
+    path,
+    image,
+    effort=7,
+    distance=1.0,
+    lossless=False,
+    *,
+    exif=None,
+    xmp=None,
+    jumbf=None,
 ):
     """Asynchronously encode a numpy array and write it to a JXL file."""
     return await asyncio.to_thread(
         write, path, image, effort, distance, lossless, exif=exif, xmp=xmp, jumbf=jumbf
     )
-
-
-# ─── Context Manager: Sync ──────────────────────────────────────────────────────
 
 
 class JXL(_JXL):
@@ -166,8 +174,18 @@ class JXL(_JXL):
         data = filepath.read_bytes()
         return self.decode(data, metadata)
 
-    def write(self, path, image, effort=None, distance=None, lossless=None,
-              *, exif=None, xmp=None, jumbf=None):
+    def write(
+        self,
+        path,
+        image,
+        effort=None,
+        distance=None,
+        lossless=None,
+        *,
+        exif=None,
+        xmp=None,
+        jumbf=None,
+    ):
         """Encode a numpy array and write it to a JXL file."""
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -216,9 +234,6 @@ class JXL(_JXL):
         jpeg_filepath.write_bytes(jpeg_data)
 
 
-# ─── Context Manager: Async ─────────────────────────────────────────────────────
-
-
 class AsyncJXL(_JXL):
     """Unified JXL/JPEG codec with async context manager support.
 
@@ -241,8 +256,17 @@ class AsyncJXL(_JXL):
 
     # ── JXL async ──
 
-    async def encode_async(self, input, effort=None, distance=None, lossless=None,
-                           *, exif=None, xmp=None, jumbf=None):
+    async def encode_async(
+        self,
+        input,
+        effort=None,
+        distance=None,
+        lossless=None,
+        *,
+        exif=None,
+        xmp=None,
+        jumbf=None,
+    ):
         """Asynchronously encode a numpy array to JXL bytes."""
         return await asyncio.to_thread(
             self.encode, input, effort, distance, lossless, exif, xmp, jumbf
@@ -304,6 +328,7 @@ class AsyncJXL(_JXL):
 
     async def convert_jpeg_to_jxl_async(self, jpeg_path, jxl_path, effort=None):
         """Asynchronously convert a JPEG file to JXL file."""
+
         def _convert():
             jpeg_filepath = Path(jpeg_path)
             if not jpeg_filepath.exists():
@@ -313,10 +338,12 @@ class AsyncJXL(_JXL):
             jpeg_data = jpeg_filepath.read_bytes()
             jxl_data = self.jpeg_to_jxl(jpeg_data, effort=effort)
             jxl_filepath.write_bytes(jxl_data)
+
         await asyncio.to_thread(_convert)
 
     async def convert_jxl_to_jpeg_async(self, jxl_path, jpeg_path):
         """Asynchronously convert a JXL file to JPEG file."""
+
         def _convert():
             jxl_filepath = Path(jxl_path)
             if not jxl_filepath.exists():
@@ -326,29 +353,28 @@ class AsyncJXL(_JXL):
             jxl_data = jxl_filepath.read_bytes()
             jpeg_data = self.jxl_to_jpeg(jxl_data)
             jpeg_filepath.write_bytes(jpeg_data)
+
         await asyncio.to_thread(_convert)
 
-
-# ─── JPEG & Transcoding ───
 
 async def encode_jpeg_async(input, quality=95):
     """Async encode numpy array to JPEG bytes."""
     return await asyncio.to_thread(encode_jpeg, input, quality=quality)
 
+
 async def decode_jpeg_async(data):
     """Async decode JPEG bytes to numpy array."""
     return await asyncio.to_thread(decode_jpeg, data)
+
 
 async def jpeg_to_jxl_async(data, effort=7):
     """Async losslessly recompress JPEG bytes to JXL bytes."""
     return await asyncio.to_thread(jpeg_to_jxl, data, effort=effort)
 
+
 async def jxl_to_jpeg_async(data):
     """Async reconstruct original JPEG bytes from JXL bytes."""
     return await asyncio.to_thread(jxl_to_jpeg, data)
-
-
-# ─── JPEG File I/O ──────────────────────────────────────────────────────────────
 
 
 def read_jpeg(path):
@@ -392,9 +418,6 @@ async def read_jpeg_async(path):
 async def write_jpeg_async(path, image, quality=95):
     """Asynchronously encode a numpy array and write it to a JPEG file."""
     return await asyncio.to_thread(write_jpeg, path, image, quality)
-
-
-# ─── Cross-Format File Conversion ───────────────────────────────────────────────
 
 
 def convert_jpeg_to_jxl(jpeg_path, jxl_path, effort=7):

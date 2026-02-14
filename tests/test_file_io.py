@@ -1,8 +1,10 @@
 import numpy as np
-import pylibjxl
 import pytest
 
+import pylibjxl
+
 # ─── Free Function: read/write ─────────────────────────────────────────────────
+
 
 class TestReadWrite:
     def test_write_read_roundtrip(self, tmp_path, sample_image):
@@ -41,7 +43,9 @@ class TestReadWrite:
         assert result.dtype == np.uint8
         # Lossy compression: exact values will differ, but shape/dtype should match
 
+
 # ─── Context Manager: read/write ──────────────────────────────────────────────
+
 
 class TestJXLReadWrite:
     def test_context_write_read(self, tmp_path, sample_image):
@@ -83,6 +87,7 @@ class TestJXLReadWrite:
 
 # ─── Async Free Function ───────────────────────────────────────────────────────
 
+
 class TestAsyncReadWrite:
     @pytest.mark.asyncio
     async def test_async_write_read_roundtrip(self, tmp_path, sample_image):
@@ -95,6 +100,7 @@ class TestAsyncReadWrite:
 
 
 # ─── Async Context Manager ─────────────────────────────────────────────────────
+
 
 class TestAsyncJXLReadWrite:
     @pytest.mark.asyncio
