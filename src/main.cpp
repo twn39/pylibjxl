@@ -59,6 +59,10 @@ void *get_thread_local_runner(size_t threads) {
   if (tl_runner == nullptr) {
     tl_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
   }
+  if (tl_runner == nullptr) {
+    return nullptr;
+  }
+  if (threads == 0) threads = 1;
   JxlResizableParallelRunnerSetThreads(tl_runner.get(), threads);
   return tl_runner.get();
 }
@@ -128,9 +132,11 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
       throw std::runtime_error("JxlEncoderCreate failed");
     }
 
-    if (JXL_ENC_SUCCESS !=
-        JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
-      throw std::runtime_error("JxlEncoderSetParallelRunner failed");
+    if (runner != nullptr) {
+      if (JXL_ENC_SUCCESS !=
+          JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
+        throw std::runtime_error("JxlEncoderSetParallelRunner failed");
+      }
     }
 
     if (has_metadata) {
@@ -298,6 +304,7 @@ py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
       if (status == JXL_DEC_SUCCESS) {
         throw std::runtime_error("Decoder finished without providing BasicInfo");
       }
+      // For any other status (like COLOR_ENCODING), just continue to skip it
     }
   }
 
@@ -326,9 +333,11 @@ py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
       throw std::runtime_error("JxlDecoderCreate failed");
     }
 
-    if (JXL_DEC_SUCCESS !=
-        JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner)) {
-      throw std::runtime_error("JxlDecoderSetParallelRunner failed");
+    if (runner != nullptr) {
+      if (JXL_DEC_SUCCESS !=
+          JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner)) {
+        throw std::runtime_error("JxlDecoderSetParallelRunner failed");
+      }
     }
 
     int events = JXL_DEC_FULL_IMAGE;
@@ -411,6 +420,7 @@ py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
         }
         break;
       }
+      // Continue for any other unhandled statuses
     }
   }
 
@@ -567,9 +577,11 @@ py::bytes jpeg_to_jxl(py::bytes jpeg_data, int effort = 7) {
     if (enc == nullptr)
       throw std::runtime_error("JxlEncoderCreate failed");
 
-    if (JXL_ENC_SUCCESS !=
-        JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
-      throw std::runtime_error("JxlEncoderSetParallelRunner failed");
+    if (runner != nullptr) {
+      if (JXL_ENC_SUCCESS !=
+          JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
+        throw std::runtime_error("JxlEncoderSetParallelRunner failed");
+      }
     }
 
     if (JXL_ENC_SUCCESS != JxlEncoderUseContainer(enc.get(), JXL_TRUE)) {
@@ -635,9 +647,11 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data) {
       throw std::runtime_error("JxlDecoderCreate failed");
     }
 
-    if (JXL_DEC_SUCCESS !=
-        JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner)) {
-      throw std::runtime_error("JxlDecoderSetParallelRunner failed");
+    if (runner != nullptr) {
+      if (JXL_DEC_SUCCESS !=
+          JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner)) {
+        throw std::runtime_error("JxlDecoderSetParallelRunner failed");
+      }
     }
 
     if (JXL_DEC_SUCCESS !=
