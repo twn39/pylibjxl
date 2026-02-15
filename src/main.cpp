@@ -748,12 +748,12 @@ public:
     bool ll = lossless.value_or(lossless_);
     float dist = distance.value_or(ll ? 0.0F : distance_);
     int ds = decoding_speed.value_or(decoding_speed_);
-    return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, runner_.get());
+    return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, nullptr);
   }
 
   py::object decode_image(py::bytes data, bool metadata) {
     check_closed();
-    return decode_impl(data, metadata, runner_.get());
+    return decode_impl(data, metadata, nullptr);
   }
 
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
@@ -781,12 +781,6 @@ public:
 
   PyJxlCodec &enter() {
     check_closed();
-    if (runner_ == nullptr) {
-      runner_.reset(JxlResizableParallelRunnerCreate(nullptr));
-      if (runner_ == nullptr) {
-        throw std::runtime_error("JxlResizableParallelRunnerCreate failed");
-      }
-    }
     return *this;
   }
 
@@ -797,7 +791,6 @@ public:
   }
 
   void close() {
-    runner_.reset();
     closed_ = true;
   }
 
@@ -810,7 +803,6 @@ private:
     }
   }
 
-  JxlRunnerPtr runner_;
   int effort_;
   float distance_;
   bool lossless_;
