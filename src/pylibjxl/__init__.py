@@ -182,7 +182,7 @@ class JXL(_JXL):
 
     Usage::
 
-        with pylibjxl.JXL(effort=7) as jxl:
+        with pylibjxl.JXL(effort=7, threads=4) as jxl:
             # JXL
             jxl.write("output.jxl", image, exif=exif_bytes)
             img, meta = jxl.read("output.jxl", metadata=True)
@@ -192,6 +192,15 @@ class JXL(_JXL):
             # Cross-format
             jxl.convert_jpeg_to_jxl("input.jpg", "output.jxl")
             jxl.convert_jxl_to_jpeg("input.jxl", "output.jpg")
+
+    Args:
+        effort: Encoding effort [1-11] (default 7).
+        distance: Perceptual distance [0.0-25.0] (default 1.0).
+        lossless: If True, encode losslessly (default False).
+        decoding_speed: Decoding speed tier [0-4] (default 0).
+        threads: Number of worker threads to use (default 0 = auto-detect).
+                 For asyncio/FastAPI, set this to a fixed value (e.g., 4-8)
+                 to prevent thread explosion.
     """
 
     # ── JXL File I/O ──
@@ -274,10 +283,19 @@ class AsyncJXL(_JXL):
 
     Usage::
 
-        async with pylibjxl.AsyncJXL(effort=7) as jxl:
+        async with pylibjxl.AsyncJXL(effort=7, threads=4) as jxl:
             await jxl.write_async("output.jxl", image)
             await jxl.write_jpeg_async("output.jpg", image)
             await jxl.convert_jpeg_to_jxl_async("in.jpg", "out.jxl")
+
+    Args:
+        effort: Encoding effort [1-11] (default 7).
+        distance: Perceptual distance [0.0-25.0] (default 1.0).
+        lossless: If True, encode losslessly (default False).
+        decoding_speed: Decoding speed tier [0-4] (default 0).
+        threads: Number of worker threads to use (default 0 = auto-detect).
+                 For asyncio/FastAPI, set this to a fixed value (e.g., 4-8)
+                 to prevent thread explosion.
     """
 
     async def __aenter__(self):

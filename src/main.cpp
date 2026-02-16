@@ -51,7 +51,7 @@ struct TjFree {
 };
 using TjBufPtr = std::unique_ptr<unsigned char, TjFree>;
 
-// Use thread_local to provide each thread with its own persistent runner, 
+// Use thread_local to provide each thread with its own persistent runner,
 // avoiding both the overhead of creation/destruction and the contention of a global singleton.
 static thread_local JxlRunnerPtr tl_runner;
 
@@ -62,7 +62,8 @@ void *get_thread_local_runner(size_t threads) {
   if (tl_runner == nullptr) {
     return nullptr;
   }
-  if (threads == 0) threads = 1;
+  if (threads == 0)
+    threads = 1;
   JxlResizableParallelRunnerSetThreads(tl_runner.get(), threads);
   return tl_runner.get();
 }
@@ -86,7 +87,10 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
                       py::object exif,
                       py::object xmp,
                       py::object jumbf,
-                      void *shared_runner) {
+                      void *shared_runner,
+                      void *shared_runner_mutex) {
+  // std::fprintf(stderr, "DEBUG: encode_impl start, runner=%p\n", shared_runner);
+  // std::fflush(stderr);
   auto buf = input.request();
   if (buf.ndim != 3) {
     throw std::invalid_argument("Input must be a 3D array (height, width, channels), got ndim=" +
@@ -118,14 +122,19 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
   std::vector<uint8_t> compressed;
   {
     py::gil_scoped_release release;
+    // If a shared runner is provided, we must serialize access to it because
+    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    std::unique_lock<std::mutex> lock;
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    }
 
     void *runner = shared_runner;
     if (runner == nullptr) {
       runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(width, height));
-    } else {
-      JxlResizableParallelRunnerSetThreads(runner,
-                                           JxlResizableParallelRunnerSuggestThreads(width, height));
     }
+    // If shared_runner is provided, we assume it's already configured with threads.
+    // If it's the thread-local one, get_thread_local_runner already configured it.
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
     if (enc == nullptr) {
@@ -133,10 +142,13 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
     }
 
     if (runner != nullptr) {
+      // std::fprintf(stderr, "DEBUG: Using shared runner %p\n", runner);
       if (JXL_ENC_SUCCESS !=
           JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
         throw std::runtime_error("JxlEncoderSetParallelRunner failed");
       }
+    } else {
+      // std::fprintf(stderr, "DEBUG: Using thread local runner\n");
     }
 
     if (has_metadata) {
@@ -241,7 +253,10 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
       }
     }
     if (status != JXL_ENC_SUCCESS) {
-      throw std::runtime_error("JxlEncoderProcessOutput failed");
+      // std::fprintf(stderr, "DEBUG: JxlEncoderProcessOutput failed with status %d, error %d\n",
+      //              status, JxlEncoderGetError(enc.get()));
+      throw std::runtime_error("JxlEncoderProcessOutput failed: status=" + std::to_string(status) +
+                               ", error=" + std::to_string(JxlEncoderGetError(enc.get())));
     }
     compressed.resize(static_cast<size_t>(next_out - compressed.data()));
     compressed.shrink_to_fit();
@@ -258,11 +273,13 @@ py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast>
                  py::object exif = py::none(),
                  py::object xmp = py::none(),
                  py::object jumbf = py::none()) {
-  return encode_impl(input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, nullptr);
+  return encode_impl(
+      input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, nullptr, nullptr);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
+py::object
+decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_runner_mutex) {
   char *raw_ptr = nullptr; // NOLINT(misc-const-correctness)
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(data.ptr(), &raw_ptr, &raw_size) != 0) {
@@ -318,15 +335,19 @@ py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
   std::map<std::string, std::vector<uint8_t>> boxes;
   {
     py::gil_scoped_release release;
+    // If a shared runner is provided, we must serialize access to it because
+    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    std::unique_lock<std::mutex> lock;
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    }
 
     void *runner = shared_runner;
     if (runner == nullptr) {
       runner =
           get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
-    } else {
-      JxlResizableParallelRunnerSetThreads(
-          runner, JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
     }
+    // If shared_runner is provided, we assume it's already configured with threads.
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
     if (dec == nullptr) {
@@ -445,7 +466,7 @@ py::object decode_impl(py::bytes data, bool metadata, void *shared_runner) {
 }
 
 py::object decode(py::bytes data, bool metadata = false) {
-  return decode_impl(data, metadata, nullptr);
+  return decode_impl(data, metadata, nullptr, nullptr);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -556,7 +577,8 @@ py::array_t<uint8_t> decode_jpeg(py::bytes data) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-py::bytes jpeg_to_jxl(py::bytes jpeg_data, int effort = 7) {
+py::bytes
+jpeg_to_jxl(py::bytes jpeg_data, int effort, void *shared_runner, void *shared_runner_mutex) {
   char *raw_ptr = nullptr; // NOLINT
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(jpeg_data.ptr(), &raw_ptr, &raw_size) != 0) {
@@ -570,8 +592,17 @@ py::bytes jpeg_to_jxl(py::bytes jpeg_data, int effort = 7) {
   std::vector<uint8_t> compressed;
   {
     py::gil_scoped_release release;
+    // If a shared runner is provided, we must serialize access to it because
+    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    std::unique_lock<std::mutex> lock;
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    }
 
-    void *runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+    void *runner = shared_runner;
+    if (runner == nullptr) {
+      runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+    }
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
     if (enc == nullptr)
@@ -627,7 +658,7 @@ py::bytes jpeg_to_jxl(py::bytes jpeg_data, int effort = 7) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-py::bytes jxl_to_jpeg(py::bytes jxl_data) {
+py::bytes jxl_to_jpeg(py::bytes jxl_data, void *shared_runner, void *shared_runner_mutex) {
   char *raw_ptr = nullptr; // NOLINT
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(jxl_data.ptr(), &raw_ptr, &raw_size) != 0) {
@@ -639,8 +670,17 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data) {
   std::vector<uint8_t> jpeg_data;
   {
     py::gil_scoped_release release;
+    // If a shared runner is provided, we must serialize access to it because
+    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    std::unique_lock<std::mutex> lock;
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    }
 
-    void *runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+    void *runner = shared_runner;
+    if (runner == nullptr) {
+      runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+    }
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
     if (dec == nullptr) {
@@ -718,14 +758,27 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data) {
 class PyJxlCodec {
 public:
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-member-init)
+  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-member-init)
   PyJxlCodec(int effort = 7,
              float distance = 1.0F,
              bool lossless = false,
-             int decoding_speed = 0)
+             int decoding_speed = 0,
+             int threads = 0)
       : effort_(std::clamp(effort, 1, 11)),
-        distance_(lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F)),
-        lossless_(lossless),
-        decoding_speed_(std::clamp(decoding_speed, 0, 4)) {}
+        distance_(lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F)), lossless_(lossless),
+        decoding_speed_(std::clamp(decoding_speed, 0, 4)) {
+    runner_.reset(JxlResizableParallelRunnerCreate(nullptr));
+    if (runner_ == nullptr) {
+      throw std::runtime_error("JxlResizableParallelRunnerCreate failed");
+    }
+    size_t num_threads = 0;
+    if (threads <= 0) {
+      num_threads = JxlResizableParallelRunnerSuggestThreads(0, 0);
+    } else {
+      num_threads = static_cast<size_t>(threads);
+    }
+    JxlResizableParallelRunnerSetThreads(runner_.get(), num_threads);
+  }
 
   ~PyJxlCodec() { close(); }
 
@@ -748,12 +801,12 @@ public:
     bool ll = lossless.value_or(lossless_);
     float dist = distance.value_or(ll ? 0.0F : distance_);
     int ds = decoding_speed.value_or(decoding_speed_);
-    return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, nullptr);
+    return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, runner_.get(), &mutex_);
   }
 
   py::object decode_image(py::bytes data, bool metadata) {
     check_closed();
-    return decode_impl(data, metadata, nullptr);
+    return decode_impl(data, metadata, runner_.get(), &mutex_);
   }
 
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
@@ -771,12 +824,12 @@ public:
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
   py::bytes jpeg_to_jxl_image(py::bytes jpeg_data, std::optional<int> effort) {
     check_closed();
-    return jpeg_to_jxl(jpeg_data, effort.value_or(effort_));
+    return jpeg_to_jxl(jpeg_data, effort.value_or(effort_), runner_.get(), &mutex_);
   }
 
   py::bytes jxl_to_jpeg_image(py::bytes jxl_data) {
     check_closed();
-    return jxl_to_jpeg(jxl_data);
+    return jxl_to_jpeg(jxl_data, runner_.get(), &mutex_);
   }
 
   PyJxlCodec &enter() {
@@ -792,6 +845,7 @@ public:
 
   void close() {
     closed_ = true;
+    runner_.reset();
   }
 
   [[nodiscard]] bool closed() const { return closed_; }
@@ -808,6 +862,8 @@ private:
   bool lossless_;
   int decoding_speed_;
   bool closed_ = false;
+  JxlRunnerPtr runner_;
+  std::mutex mutex_;
 };
 
 } // namespace
@@ -873,11 +929,12 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
                          "        img = jxl.decode_jpeg(jpeg)\n"
                          "        jxl_data = jxl.jpeg_to_jxl(jpeg)\n"
                          "        jpeg_back = jxl.jxl_to_jpeg(jxl_data)\n")
-      .def(py::init<int, float, bool, int>(),
+      .def(py::init<int, float, bool, int, int>(),
            "effort"_a = 7,
            "distance"_a = 1.0F,
            "lossless"_a = false,
-           "decoding_speed"_a = 0)
+           "decoding_speed"_a = 0,
+           "threads"_a = 0)
       .def("encode",
            &PyJxlCodec::encode_image,
            "Encode a numpy array to JXL bytes.\n\n"
@@ -935,10 +992,14 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
         &jpeg_to_jxl,
         "Losslessly recompress valid JPEG bytes to JXL bytes.",
         "data"_a,
-        "effort"_a = 7);
+        "effort"_a = 7,
+        "shared_runner"_a = nullptr,
+        "shared_runner_mutex"_a = nullptr);
 
   m.def("jxl_to_jpeg",
         &jxl_to_jpeg,
         "Reconstruct original JPEG bytes from JXL bytes (if recompressed).",
-        "data"_a);
+        "data"_a,
+        "shared_runner"_a = nullptr,
+        "shared_runner_mutex"_a = nullptr);
 }

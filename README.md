@@ -22,7 +22,7 @@
 - ⚡ **Async-First** — Native `asyncio` integration for non-blocking I/O.
 - 🖼️ **NumPy Native** — Directly encode from and decode to `ndarray` (RGB/RGBA).
 - 🔄 **Lossless JPEG Transcoding** — Bit-perfect JPEG ↔ JXL roundtrips.
-- 🎯 **Thread-Safe** — Persistent thread pools via context managers.
+- 🎯 **Thread-Safe** — Persistent thread pools with resource control via `threads` parameter.
 
 ---
 
@@ -108,6 +108,44 @@ with pylibjxl.JXL(effort=7) as jxl:
         img = jxl.read(f"input_{i}.jxl")
         # Process and save as high-quality JPEG
         jxl.write_jpeg(f"output_{i}.jpg", img, quality=95)
+```
+
+### 🚀 FastAPI / Asyncio Integration
+`pylibjxl` is designed for high-concurrency web servers. By using a shared `AsyncJXL` instance, you can limit the total number of native worker threads, preventing resource exhaustion under load.
+
+```python
+from fastapi import FastAPI, UploadFile
+import pylibjxl
+import numpy as np
+
+app = FastAPI()
+
+# Create a single shared runner with a fixed thread pool (e.g., 8 threads).
+# This prevents thread explosion even if 1000 requests arrive simultaneously.
+runner = pylibjxl.AsyncJXL(threads=8)
+
+@app.on_event("startup")
+async def startup():
+    runner.enter()
+
+@app.on_event("shutdown")
+async def shutdown():
+    runner.close()
+
+@app.post("/encode")
+async def encode_image(file: UploadFile):
+    # Read bytes (non-blocking)
+    content = await file.read()
+    
+    # Offload decoding to the shared C++ runner (releases GIL)
+    # Concurrent requests will be serialized at the runner level if needed,
+    # preventing CPU oversubscription while keeping the event loop responsive.
+    image = await runner.decode_jpeg_async(content)
+    
+    # Process image...
+    
+    # Encode back to JXL
+    return await runner.encode_async(image, effort=5)
 ```
 
 ---
@@ -320,6 +358,7 @@ Sync and Async context managers that maintain a persistent thread pool.
 | `distance` | `float` | `1.0` | Default distance for operations. |
 | `lossless` | `bool` | `False` | Default lossless mode. |
 | `decoding_speed` | `int` | `0` | Default decoding speed tier. |
+| `threads` | `int` | `0` | Number of worker threads for the shared pool (0 = auto). |
 
 ```python
 with pylibjxl.JXL(effort=7) as jxl:
