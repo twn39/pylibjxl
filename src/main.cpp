@@ -61,8 +61,6 @@ size_t suggest_threads(uint64_t xsize, uint64_t ysize) {
 
 void *get_thread_local_runner(size_t threads) {
   if (tl_runner == nullptr) {
-    std::fprintf(stderr, "DEBUG [C++]: Creating thread_local JxlResizableParallelRunner\n");
-    std::fflush(stderr);
     tl_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
   }
   if (tl_runner == nullptr) {
@@ -70,8 +68,6 @@ void *get_thread_local_runner(size_t threads) {
   }
   if (threads == 0)
     threads = 1;
-  std::fprintf(stderr, "DEBUG [C++]: Setting runner threads to %zu\n", threads);
-  std::fflush(stderr);
   JxlResizableParallelRunnerSetThreads(tl_runner.get(), threads);
   return tl_runner.get();
 }
@@ -97,8 +93,6 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
                       py::object jumbf,
                       void *shared_runner,
                       void *shared_runner_mutex) {
-  std::fprintf(stderr, "DEBUG [C++]: encode_impl start, shared_runner=%p\n", shared_runner);
-  std::fflush(stderr);
   auto buf = input.request();
   if (buf.ndim != 3) {
     throw std::invalid_argument("Input must be a 3D array (height, width, channels), got ndim=" +
@@ -288,8 +282,6 @@ py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast>
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 py::object
 decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_runner_mutex) {
-  std::fprintf(stderr, "DEBUG [C++]: decode_impl start, shared_runner=%p\n", shared_runner);
-  std::fflush(stderr);
   char *raw_ptr = nullptr; // NOLINT(misc-const-correctness)
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(data.ptr(), &raw_ptr, &raw_size) != 0) {
@@ -776,8 +768,6 @@ public:
       : effort_(std::clamp(effort, 1, 11)),
         distance_(lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F)), lossless_(lossless),
         decoding_speed_(std::clamp(decoding_speed, 0, 4)) {
-    std::fprintf(stderr, "DEBUG [C++]: Initializing PyJxlCodec with threads=%d\n", threads);
-    std::fflush(stderr);
     runner_.reset(JxlResizableParallelRunnerCreate(nullptr));
     if (runner_ == nullptr) {
       throw std::runtime_error("JxlResizableParallelRunnerCreate failed");
@@ -788,8 +778,6 @@ public:
     } else {
       num_threads = static_cast<size_t>(threads);
     }
-    std::fprintf(stderr, "DEBUG [C++]: PyJxlCodec using %zu threads\n", num_threads);
-    std::fflush(stderr);
     JxlResizableParallelRunnerSetThreads(runner_.get(), num_threads);
   }
 
