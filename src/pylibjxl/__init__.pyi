@@ -1,7 +1,8 @@
-from typing import Any, Dict, Optional, Tuple, Union, overload, Literal
+from pathlib import Path
+from typing import Any, Dict, Literal, Optional, Tuple, Union, overload
+
 import numpy as np
 import numpy.typing as npt
-from pathlib import Path
 
 # --- Native extension functions ---
 
@@ -34,7 +35,7 @@ def jpeg_to_jxl(data: bytes, effort: int = 7) -> bytes: ...
 def jxl_to_jpeg(data: bytes) -> bytes: ...
 
 class _JXL:
-    def __init__(self, effort: int = 7, distance: float = 1.0, lossless: bool = False, decoding_speed: int = 0) -> None: ...
+    def __init__(self, effort: int = 7, distance: float = 1.0, lossless: bool = False, decoding_speed: int = 0, threads: int = 0) -> None: ...
     def encode(
         self,
         input: npt.NDArray[np.uint8],
@@ -192,6 +193,10 @@ class AsyncJXL(_JXL):
         distance: Optional[float] = None,
         lossless: Optional[bool] = None,
         decoding_speed: Optional[int] = None,
+        *,
+        exif: Optional[bytes] = None,
+        xmp: Optional[bytes] = None,
+        jumbf: Optional[bytes] = None,
     ) -> None: ...
 
     async def encode_jpeg_async(self, input: npt.NDArray[np.uint8], quality: int = 95) -> bytes: ...

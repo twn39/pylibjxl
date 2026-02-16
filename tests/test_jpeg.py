@@ -27,7 +27,6 @@ def test_encode_rgba(sample_image_rgba):
 
 def test_invalid_input():
     with pytest.raises(TypeError):
-        from typing import Any
         pylibjxl.encode_jpeg(b"not an array"  # type: ignore
                              )
 

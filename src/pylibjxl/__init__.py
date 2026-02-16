@@ -352,10 +352,22 @@ class AsyncJXL(_JXL):
         distance=None,
         lossless=None,
         decoding_speed=None,
+        *,
+        exif=None,
+        xmp=None,
+        jumbf=None,
     ):
         """Asynchronously encode and write to a JXL file."""
         data = await asyncio.to_thread(
-            self.encode, image, effort, distance, lossless, decoding_speed
+            self.encode,
+            image,
+            effort,
+            distance,
+            lossless,
+            decoding_speed,
+            exif,
+            xmp,
+            jumbf,
         )
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)

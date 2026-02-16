@@ -1,10 +1,11 @@
 import asyncio
 import gc
 import os
+
 import psutil
-import time
-import numpy as np
+
 from pylibjxl import AsyncJXL
+
 
 def get_process_memory_mb():
     process = psutil.Process(os.getpid())
