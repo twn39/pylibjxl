@@ -19,8 +19,8 @@
     - Handles EXIF, XMP, and JUMBF metadata boxes.
 - **`src/pylibjxl/__init__.py`**: The Python wrapper.
     - Maps low-level C++ functions to a user-friendly API.
-    - Implements `encode_async`, `decode_async`, and other `_async` variants.
-    - Provides `JXL` (sync) and `AsyncJXL` (async) context managers for persistent thread pool reuse.
+    - Implements `encode_async`, `decode_async`, and other `_async` variants using `asyncio.to_thread`.
+    - Provides `JXL` (sync) and `AsyncJXL` (async) context managers for persistent thread pool reuse, allowing explicit control over worker threads to prevent resource exhaustion in concurrent environments.
 - **`third_party/`**: Contains submodules for `libjxl` and `libjpeg-turbo`.
 
 ## Building and Running
