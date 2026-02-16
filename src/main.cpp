@@ -55,6 +55,10 @@ using TjBufPtr = std::unique_ptr<unsigned char, TjFree>;
 // avoiding both the overhead of creation/destruction and the contention of a global singleton.
 static thread_local JxlRunnerPtr tl_runner;
 
+size_t suggest_threads(uint64_t xsize, uint64_t ysize) {
+  return JxlResizableParallelRunnerSuggestThreads(xsize, ysize);
+}
+
 void *get_thread_local_runner(size_t threads) {
   if (tl_runner == nullptr) {
     std::fprintf(stderr, "DEBUG [C++]: Creating thread_local JxlResizableParallelRunner\n");
@@ -135,7 +139,7 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
 
     void *runner = shared_runner;
     if (runner == nullptr) {
-      runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(width, height));
+      runner = get_thread_local_runner(suggest_threads(width, height));
     }
     // If shared_runner is provided, we assume it's already configured with threads.
     // If it's the thread-local one, get_thread_local_runner already configured it.
@@ -351,7 +355,7 @@ decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_run
     void *runner = shared_runner;
     if (runner == nullptr) {
       runner =
-          get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
+          get_thread_local_runner(suggest_threads(info.xsize, info.ysize));
     }
     // If shared_runner is provided, we assume it's already configured with threads.
 
@@ -780,7 +784,7 @@ public:
     }
     size_t num_threads = 0;
     if (threads <= 0) {
-      num_threads = JxlResizableParallelRunnerSuggestThreads(0, 0);
+      num_threads = suggest_threads(0, 0);
     } else {
       num_threads = static_cast<size_t>(threads);
     }
