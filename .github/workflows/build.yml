@@ -19,15 +19,16 @@ jobs:
           submodules: recursive
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.3.1
+        uses: pypa/cibuildwheel@v2.22.0
         env:
           CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
-          CIBW_SKIP: "*-musllinux_* *-win32"
+          CIBW_SKIP: "*-musllinux_* *-win32 pp*"
           CIBW_ARCHS_LINUX: auto
           CIBW_ARCHS_MACOS: x86_64 arm64
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=14.0
-          CIBW_TEST_GROUPS: dev
-          CIBW_TEST_COMMAND: pytest {project}/tests
+          CIBW_BEFORE_BUILD: "pip install uv && uv pip install -e . --system"
+          CIBW_TEST_REQUIRES: "pytest pytest-asyncio pytest-benchmark pytest-cov pillow"
+          CIBW_TEST_COMMAND: "pytest {project}/tests"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -47,9 +48,11 @@ jobs:
 
       - name: Quick install check
         run: |
-          pip install numpy
-          pip install dist/*.tar.gz
-          python -c "import pylibjxl; print(pylibjxl.version())"
+          pip install uv
+          uv venv
+          uv pip install numpy
+          uv pip install dist/*.tar.gz
+          uv run python -c "import pylibjxl; print(pylibjxl.version())"
 
       - uses: actions/upload-artifact@v4
         with:

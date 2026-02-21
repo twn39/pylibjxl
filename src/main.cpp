@@ -4,9 +4,16 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/map.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <turbojpeg.h>
 #include <vector>
 
@@ -15,12 +22,8 @@
 #include <jxl/resizable_parallel_runner.h>
 #include <jxl/version.h>
 
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-
-namespace py = pybind11;
-using namespace py::literals;
+namespace nb = nanobind;
+using namespace nb::literals;
 
 namespace {
 
@@ -51,57 +54,66 @@ struct TjFree {
 };
 using TjBufPtr = std::unique_ptr<unsigned char, TjFree>;
 
-// Use thread_local to provide each thread with its own persistent runner,
-// avoiding both the overhead of creation/destruction and the contention of a global singleton.
-static thread_local JxlRunnerPtr tl_runner;
+// Use a global shared runner for free functions to avoid thread_local issues on Windows,
+// especially when used with thread pools (asyncio.to_thread).
+// Access is serialized via global_runner_mutex because JxlResizableParallelRunner is not
+// thread-safe.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+JxlRunnerPtr global_runner;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::mutex global_runner_mutex;
 
 size_t suggest_threads(uint64_t xsize, uint64_t ysize) {
-  return JxlResizableParallelRunnerSuggestThreads(xsize, ysize);
+  size_t threads = JxlResizableParallelRunnerSuggestThreads(xsize, ysize);
+  if (threads == 0) {
+    threads = std::max<size_t>(1, std::thread::hardware_concurrency());
+  }
+  return threads;
 }
 
-void *get_thread_local_runner(size_t threads) {
-  if (tl_runner == nullptr) {
-    tl_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
+void *get_global_runner(size_t threads) {
+  if (global_runner == nullptr) {
+    global_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
   }
-  if (tl_runner == nullptr) {
+  if (global_runner == nullptr) {
     return nullptr;
   }
-  if (threads == 0)
+  if (threads == 0) {
     threads = 1;
-  JxlResizableParallelRunnerSetThreads(tl_runner.get(), threads);
-  return tl_runner.get();
+  }
+  JxlResizableParallelRunnerSetThreads(global_runner.get(), threads);
+  return global_runner.get();
 }
 
-std::vector<uint8_t> extract_optional_bytes(const py::object &obj) {
+std::vector<uint8_t> extract_optional_bytes(const nb::handle &obj) {
   if (obj.is_none()) {
     return {};
   }
-  auto b = obj.cast<py::bytes>();
-  const auto *ptr = PyBytes_AsString(b.ptr());
-  const auto size = static_cast<size_t>(PyBytes_Size(b.ptr()));
-  return {reinterpret_cast<const uint8_t *>(ptr), reinterpret_cast<const uint8_t *>(ptr) + size};
+  const auto *ptr = reinterpret_cast<const uint8_t *>(PyBytes_AsString(obj.ptr()));
+  const auto size = static_cast<size_t>(PyBytes_Size(obj.ptr()));
+  return {ptr, ptr + size};
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,cppcoreguidelines-avoid-non-const-global-variables)
+nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                       int effort,
                       float distance,
                       bool lossless,
                       int decoding_speed,
-                      py::object exif,
-                      py::object xmp,
-                      py::object jumbf,
+                      nb::handle exif,
+                      nb::handle xmp,
+                      nb::handle jumbf,
                       void *shared_runner,
                       void *shared_runner_mutex) {
-  auto buf = input.request();
-  if (buf.ndim != 3) {
+  if (input.ndim() != 3) {
     throw std::invalid_argument("Input must be a 3D array (height, width, channels), got ndim=" +
-                                std::to_string(buf.ndim));
+                                std::to_string(input.ndim()));
   }
 
-  const auto height = static_cast<size_t>(buf.shape[0]);
-  const auto width = static_cast<size_t>(buf.shape[1]);
-  const auto channels = static_cast<size_t>(buf.shape[2]);
+  const auto height = static_cast<size_t>(input.shape(0));
+  const auto width = static_cast<size_t>(input.shape(1));
+  const auto channels = static_cast<size_t>(input.shape(2));
 
   if (channels != 3 && channels != 4) {
     throw std::invalid_argument("Input must have 3 (RGB) or 4 (RGBA) channels, got " +
@@ -118,25 +130,30 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
   decoding_speed = std::clamp(decoding_speed, 0, 4);
   distance = lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F);
 
-  const auto *input_ptr = static_cast<const uint8_t *>(buf.ptr);
-  const auto input_size = static_cast<size_t>(buf.size * buf.itemsize);
+  const auto *input_ptr = static_cast<const uint8_t *>(input.data());
+  const auto input_size = static_cast<size_t>(input.size() * sizeof(uint8_t));
 
   std::vector<uint8_t> compressed;
   {
-    py::gil_scoped_release release;
+    nb::gil_scoped_release release;
     // If a shared runner is provided, we must serialize access to it because
     // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    // If no shared runner is provided (free functions), we use a global shared runner.
     std::unique_lock<std::mutex> lock;
+
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (shared_runner_mutex != nullptr) {
       lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else {
+      lock = std::unique_lock<std::mutex>(global_runner_mutex);
     }
 
+
+    // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
     if (runner == nullptr) {
-      runner = get_thread_local_runner(suggest_threads(width, height));
+      runner = get_global_runner(suggest_threads(width, height));
     }
-    // If shared_runner is provided, we assume it's already configured with threads.
-    // If it's the thread-local one, get_thread_local_runner already configured it.
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
     if (enc == nullptr) {
@@ -144,13 +161,10 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
     }
 
     if (runner != nullptr) {
-      // std::fprintf(stderr, "DEBUG: Using shared runner %p\n", runner);
       if (JXL_ENC_SUCCESS !=
           JxlEncoderSetParallelRunner(enc.get(), JxlResizableParallelRunner, runner)) {
         throw std::runtime_error("JxlEncoderSetParallelRunner failed");
       }
-    } else {
-      // std::fprintf(stderr, "DEBUG: Using thread local runner\n");
     }
 
     if (has_metadata) {
@@ -186,15 +200,13 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
     }
 
     if (JXL_ENC_SUCCESS != JxlEncoderSetBasicInfo(enc.get(), &basic_info)) {
-      throw std::runtime_error("JxlEncoderSetBasicInfo failed: " +
-                               std::to_string(JxlEncoderGetError(enc.get())));
+      throw std::runtime_error("JxlEncoderSetBasicInfo failed");
     }
 
     JxlColorEncoding color_encoding = {};
     JxlColorEncodingSetToSRGB(&color_encoding, JXL_FALSE);
     if (JXL_ENC_SUCCESS != JxlEncoderSetColorEncoding(enc.get(), &color_encoding)) {
-      throw std::runtime_error("JxlEncoderSetColorEncoding failed: " +
-                               std::to_string(JxlEncoderGetError(enc.get())));
+      throw std::runtime_error("JxlEncoderSetColorEncoding failed");
     }
 
     JxlPixelFormat pixel_format = {
@@ -202,8 +214,7 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
 
     if (JXL_ENC_SUCCESS !=
         JxlEncoderAddImageFrame(frame_settings, &pixel_format, input_ptr, input_size)) {
-      throw std::runtime_error("JxlEncoderAddImageFrame failed: " +
-                               std::to_string(JxlEncoderGetError(enc.get())));
+      throw std::runtime_error("JxlEncoderAddImageFrame failed");
     }
 
     if (has_metadata) {
@@ -222,14 +233,14 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
       if (!xmp_data.empty()) {
         if (JXL_ENC_SUCCESS !=
             JxlEncoderAddBox(enc.get(), "xml ", xmp_data.data(), xmp_data.size(), JXL_TRUE)) {
-          throw std::runtime_error("JxlEncoderAddBox(xml) failed");
+          throw std::runtime_error("JxlEncoderAddBox(XMP) failed");
         }
       }
 
       if (!jumbf_data.empty()) {
         if (JXL_ENC_SUCCESS !=
             JxlEncoderAddBox(enc.get(), "jumb", jumbf_data.data(), jumbf_data.size(), JXL_TRUE)) {
-          throw std::runtime_error("JxlEncoderAddBox(jumb) failed");
+          throw std::runtime_error("JxlEncoderAddBox(JUMBF) failed");
         }
       }
 
@@ -238,7 +249,6 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
       JxlEncoderCloseInput(enc.get());
     }
 
-    // Pre-allocate buffer based on a rough estimate to reduce reallocations during processing
     const size_t estimated = std::max<size_t>(width * height * channels / 2, 4096);
     compressed.resize(estimated);
     uint8_t *next_out = compressed.data();
@@ -255,101 +265,65 @@ py::bytes encode_impl(py::array_t<uint8_t, py::array::c_style | py::array::force
       }
     }
     if (status != JXL_ENC_SUCCESS) {
-      // std::fprintf(stderr, "DEBUG: JxlEncoderProcessOutput failed with status %d, error %d\n",
-      //              status, JxlEncoderGetError(enc.get()));
-      throw std::runtime_error("JxlEncoderProcessOutput failed: status=" + std::to_string(status) +
-                               ", error=" + std::to_string(JxlEncoderGetError(enc.get())));
+      throw std::runtime_error("JxlEncoderProcessOutput failed");
     }
     compressed.resize(static_cast<size_t>(next_out - compressed.data()));
-    compressed.shrink_to_fit();
   }
 
-  return py::bytes(reinterpret_cast<const char *>(compressed.data()), compressed.size());
+  return nb::bytes(reinterpret_cast<const char *>(compressed.data()), compressed.size());
 }
 
-py::bytes encode(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+nb::bytes encode(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                  int effort = 7,
                  float distance = 1.0F,
                  bool lossless = false,
                  int decoding_speed = 0,
-                 py::object exif = py::none(),
-                 py::object xmp = py::none(),
-                 py::object jumbf = py::none()) {
+                 nb::handle exif = nb::none(),
+                 nb::handle xmp = nb::none(),
+                 nb::handle jumbf = nb::none()) {
   return encode_impl(
       input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, nullptr, nullptr);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-py::object
-decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_runner_mutex) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-non-const-global-variables)
+nb::object
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,bugprone-easily-swappable-parameters)
+decode_impl(nb::bytes data, bool metadata, void *shared_runner, void *shared_runner_mutex) {
   char *raw_ptr = nullptr; // NOLINT(misc-const-correctness)
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(data.ptr(), &raw_ptr, &raw_size) != 0) {
-    throw py::error_already_set();
+    throw nb::python_error();
   }
   const auto *jxl_data = reinterpret_cast<const uint8_t *>(raw_ptr);
   const auto jxl_size = static_cast<size_t>(raw_size);
 
   JxlBasicInfo info;
-  {
-    py::gil_scoped_release release;
-
-    JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
-    if (dec == nullptr) {
-      throw std::runtime_error("JxlDecoderCreate failed");
-    }
-
-    if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_BASIC_INFO)) {
-      throw std::runtime_error("JxlDecoderSubscribeEvents failed");
-    }
-
-    JxlDecoderSetInput(dec.get(), jxl_data, jxl_size);
-    JxlDecoderCloseInput(dec.get());
-
-    for (;;) {
-      JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
-      if (status == JXL_DEC_ERROR) {
-        throw std::runtime_error("Decoder error while reading header");
-      }
-      if (status == JXL_DEC_NEED_MORE_INPUT) {
-        throw std::runtime_error("Truncated JXL data: need more input for header");
-      }
-      if (status == JXL_DEC_BASIC_INFO) {
-        if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(dec.get(), &info)) {
-          throw std::runtime_error("JxlDecoderGetBasicInfo failed");
-        }
-        break;
-      }
-      if (status == JXL_DEC_SUCCESS) {
-        throw std::runtime_error("Decoder finished without providing BasicInfo");
-      }
-      // For any other status (like COLOR_ENCODING), just continue to skip it
-    }
-  }
-
-  const size_t channels = info.num_color_channels + (info.alpha_bits > 0 ? 1 : 0);
-  py::array_t<uint8_t> result(
-      {static_cast<size_t>(info.ysize), static_cast<size_t>(info.xsize), channels});
-  auto result_buf = result.request();
-  auto *result_ptr = result_buf.ptr;
-  const auto result_bytes = static_cast<size_t>(result_buf.size * result_buf.itemsize);
-
+  size_t channels = 0;
+  std::unique_ptr<uint8_t[]> temp_owner;
+  uint8_t *result_ptr_var = nullptr;
   std::map<std::string, std::vector<uint8_t>> boxes;
+
   {
-    py::gil_scoped_release release;
-    // If a shared runner is provided, we must serialize access to it because
-    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    nb::gil_scoped_release release;
+
     std::unique_lock<std::mutex> lock;
+
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (shared_runner_mutex != nullptr) {
       lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else {
+      lock = std::unique_lock<std::mutex>(global_runner_mutex);
     }
 
+
+    // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
     if (runner == nullptr) {
-      runner =
-          get_thread_local_runner(suggest_threads(info.xsize, info.ysize));
+      runner = get_global_runner(0);
     }
-    // If shared_runner is provided, we assume it's already configured with threads.
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
     if (dec == nullptr) {
@@ -363,9 +337,9 @@ decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_run
       }
     }
 
-    int events = JXL_DEC_FULL_IMAGE;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int events = JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE | (metadata ? JXL_DEC_BOX : 0);
     if (metadata) {
-      events |= JXL_DEC_BOX;
       JxlDecoderSetDecompressBoxes(dec.get(), JXL_TRUE);
     }
     if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(dec.get(), events)) {
@@ -375,8 +349,7 @@ decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_run
     JxlDecoderSetInput(dec.get(), jxl_data, jxl_size);
     JxlDecoderCloseInput(dec.get());
 
-    JxlPixelFormat format = {static_cast<uint32_t>(channels), JXL_TYPE_UINT8, JXL_LITTLE_ENDIAN, 0};
-
+    JxlPixelFormat format = {};
     std::string current_box_type;
     std::vector<uint8_t> box_buffer;
     constexpr size_t k_box_chunk_size = 65536;
@@ -391,11 +364,22 @@ decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_run
         throw std::runtime_error("Truncated JXL data: need more input for pixels");
       }
       if (status == JXL_DEC_BASIC_INFO) {
+        if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(dec.get(), &info)) {
+          throw std::runtime_error("JxlDecoderGetBasicInfo failed");
+        }
+        if (shared_runner == nullptr) {
+          JxlResizableParallelRunnerSetThreads(runner, suggest_threads(info.xsize, info.ysize));
+        }
+        channels = info.num_color_channels + (info.alpha_bits > 0 ? 1 : 0);
+        format = {static_cast<uint32_t>(channels), JXL_TYPE_UINT8, JXL_LITTLE_ENDIAN, 0};
         continue;
       }
       if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+        const size_t result_bytes = static_cast<size_t>(info.ysize * info.xsize * channels);
+        temp_owner.reset(new uint8_t[result_bytes]);
+        result_ptr_var = temp_owner.get();
         if (JXL_DEC_SUCCESS !=
-            JxlDecoderSetImageOutBuffer(dec.get(), &format, result_ptr, result_bytes)) {
+            JxlDecoderSetImageOutBuffer(dec.get(), &format, result_ptr_var, result_bytes)) {
           throw std::runtime_error("JxlDecoderSetImageOutBuffer failed");
         }
         continue;
@@ -447,40 +431,43 @@ decode_impl(py::bytes data, bool metadata, void *shared_runner, void *shared_run
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  size_t shape[3] = {static_cast<size_t>(info.ysize), static_cast<size_t>(info.xsize), channels};
+  nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] (uint8_t *)p; });
+  temp_owner.release();
+  nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> result(result_ptr_var, 3, shape, owner);
+
   if (!metadata) {
-    return result;
+    return nb::cast(result);
   }
 
-  py::dict meta;
+  nb::dict meta;
   for (auto &[key, value] : boxes) {
     if (key == "Exif" && value.size() > 4) {
-      // Strip the 4-byte TIFF header offset prefix added during encoding
-      meta[py::cast("exif")] =
-          py::bytes(reinterpret_cast<const char *>(value.data() + 4), value.size() - 4);
+      meta["exif"] = nb::bytes(reinterpret_cast<const char *>(value.data() + 4), value.size() - 4);
     } else if (key == "xml ") {
-      meta[py::cast("xmp")] = py::bytes(reinterpret_cast<const char *>(value.data()), value.size());
+      meta["xmp"] = nb::bytes(reinterpret_cast<const char *>(value.data()), value.size());
     } else if (key == "jumb") {
-      meta[py::cast("jumbf")] =
-          py::bytes(reinterpret_cast<const char *>(value.data()), value.size());
+      meta["jumbf"] = nb::bytes(reinterpret_cast<const char *>(value.data()), value.size());
     }
   }
-  return py::make_tuple(result, meta);
+  return nb::make_tuple(result, meta);
 }
 
-py::object decode(py::bytes data, bool metadata = false) {
+nb::object decode(nb::bytes data, bool metadata = false) {
   return decode_impl(data, metadata, nullptr, nullptr);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-py::bytes encode_jpeg(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
-                      int quality = 95) {
-  auto buf = input.request();
-  if (buf.ndim != 3) {
+nb::bytes encode_jpeg(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input, int quality = 95) {
+  if (input.ndim() != 3) {
     throw std::invalid_argument("Input must be a 3D array (height, width, channels)");
   }
-  const auto height = static_cast<int>(buf.shape[0]);
-  const auto width = static_cast<int>(buf.shape[1]);
-  const auto channels = static_cast<int>(buf.shape[2]);
+  const auto height = static_cast<int>(input.shape(0));
+  const auto width = static_cast<int>(input.shape(1));
+  const auto channels = static_cast<int>(input.shape(2));
 
   if (channels != 3 && channels != 4) {
     throw std::invalid_argument("Input must have 3 (RGB) or 4 (RGBA) channels");
@@ -488,11 +475,13 @@ py::bytes encode_jpeg(py::array_t<uint8_t, py::array::c_style | py::array::force
 
   quality = std::clamp(quality, 1, 100);
 
+  const auto *input_ptr = static_cast<const uint8_t *>(input.data());
+
   unsigned char *jpeg_buf = nullptr;
   unsigned long jpeg_size = 0; // NOLINT(google-runtime-int)
 
   {
-    py::gil_scoped_release release;
+    nb::gil_scoped_release release;
 
     TjPtr compressor(tjInitCompress());
     if (compressor == nullptr) {
@@ -503,7 +492,7 @@ py::bytes encode_jpeg(py::array_t<uint8_t, py::array::c_style | py::array::force
     int subsamp = TJSAMP_444;
 
     if (tjCompress2(compressor.get(),
-                    static_cast<const unsigned char *>(buf.ptr),
+                    static_cast<const unsigned char *>(input_ptr),
                     width,
                     0,
                     height,
@@ -519,15 +508,15 @@ py::bytes encode_jpeg(py::array_t<uint8_t, py::array::c_style | py::array::force
   }
 
   TjBufPtr guard(jpeg_buf);
-  return py::bytes(reinterpret_cast<const char *>(jpeg_buf), jpeg_size);
+  return nb::bytes(reinterpret_cast<const char *>(jpeg_buf), jpeg_size);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-py::array_t<uint8_t> decode_jpeg(py::bytes data) {
+nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> decode_jpeg(nb::bytes data) {
   char *raw_ptr = nullptr; // NOLINT
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(data.ptr(), &raw_ptr, &raw_size) != 0) {
-    throw py::error_already_set();
+    throw nb::python_error();
   }
 
   const auto *jpeg_data = reinterpret_cast<const unsigned char *>(raw_ptr);
@@ -538,8 +527,11 @@ py::array_t<uint8_t> decode_jpeg(py::bytes data) {
   int subsamp = 0;
   int colorspace = 0;
 
+  std::unique_ptr<uint8_t[]> temp_owner;
+  uint8_t *result_ptr_var = nullptr;
+
   {
-    py::gil_scoped_release release;
+    nb::gil_scoped_release release;
     TjPtr decompressor(tjInitDecompress());
     if (decompressor == nullptr) {
       throw std::runtime_error("tjInitDecompress failed");
@@ -550,21 +542,14 @@ py::array_t<uint8_t> decode_jpeg(py::bytes data) {
       throw std::runtime_error(std::string("tjDecompressHeader3 failed: ") +
                                tjGetErrorStr2(decompressor.get()));
     }
-  }
 
-  py::array_t<uint8_t> result({height, width, 3});
-  auto buf = result.request();
+    temp_owner.reset(new uint8_t[height * width * 3]);
+    result_ptr_var = temp_owner.get();
 
-  {
-    py::gil_scoped_release release;
-    TjPtr decompressor(tjInitDecompress());
-    if (decompressor == nullptr) {
-      throw std::runtime_error("tjInitDecompress failed");
-    }
     if (tjDecompress2(decompressor.get(),
                       jpeg_data,
                       jpeg_size,
-                      static_cast<unsigned char *>(buf.ptr),
+                      static_cast<unsigned char *>(result_ptr_var),
                       width,
                       0,
                       height,
@@ -575,16 +560,26 @@ py::array_t<uint8_t> decode_jpeg(py::bytes data) {
     }
   }
 
-  return result;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  size_t shape[3] = {static_cast<size_t>(height), static_cast<size_t>(width), 3};
+  nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] (uint8_t *)p; });
+  temp_owner.release();
+
+  return nb::ndarray<uint8_t, nb::numpy, nb::device::cpu>(result_ptr_var, 3, shape, owner);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-py::bytes
-jpeg_to_jxl(py::bytes jpeg_data, int effort, void *shared_runner, void *shared_runner_mutex) {
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-non-const-global-variables)
+nb::bytes
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+jpeg_to_jxl(nb::bytes jpeg_data, int effort, void *shared_runner, void *shared_runner_mutex) {
   char *raw_ptr = nullptr; // NOLINT
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(jpeg_data.ptr(), &raw_ptr, &raw_size) != 0) {
-    throw py::error_already_set();
+    throw nb::python_error();
   }
   const auto *jpeg_ptr = reinterpret_cast<const uint8_t *>(raw_ptr);
   const auto jpeg_len = static_cast<size_t>(raw_size);
@@ -593,17 +588,24 @@ jpeg_to_jxl(py::bytes jpeg_data, int effort, void *shared_runner, void *shared_r
 
   std::vector<uint8_t> compressed;
   {
-    py::gil_scoped_release release;
+    nb::gil_scoped_release release;
     // If a shared runner is provided, we must serialize access to it because
     // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    // If no shared runner is provided (free functions), we use a global shared runner.
     std::unique_lock<std::mutex> lock;
+
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (shared_runner_mutex != nullptr) {
       lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else {
+      lock = std::unique_lock<std::mutex>(global_runner_mutex);
     }
 
+
+    // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
     if (runner == nullptr) {
-      runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+      runner = get_global_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
     }
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
@@ -656,32 +658,39 @@ jpeg_to_jxl(py::bytes jpeg_data, int effort, void *shared_runner, void *shared_r
     }
     compressed.resize(next_out - compressed.data());
   }
-  return py::bytes(reinterpret_cast<const char *>(compressed.data()), compressed.size());
+  return nb::bytes(reinterpret_cast<const char *>(compressed.data()), compressed.size());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-py::bytes jxl_to_jpeg(py::bytes jxl_data, void *shared_runner, void *shared_runner_mutex) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-non-const-global-variables)
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,bugprone-easily-swappable-parameters)
+nb::bytes jxl_to_jpeg(nb::bytes jxl_data, void *shared_runner, void *shared_runner_mutex) {
   char *raw_ptr = nullptr; // NOLINT
   Py_ssize_t raw_size = 0;
   if (PyBytes_AsStringAndSize(jxl_data.ptr(), &raw_ptr, &raw_size) != 0) {
-    throw py::error_already_set();
+    throw nb::python_error();
   }
   const auto *jxl_ptr = reinterpret_cast<const uint8_t *>(raw_ptr);
   const auto jxl_len = static_cast<size_t>(raw_size);
 
   std::vector<uint8_t> jpeg_data;
   {
-    py::gil_scoped_release release;
-    // If a shared runner is provided, we must serialize access to it because
-    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
+    nb::gil_scoped_release release;
     std::unique_lock<std::mutex> lock;
+
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (shared_runner_mutex != nullptr) {
       lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else {
+      lock = std::unique_lock<std::mutex>(global_runner_mutex);
     }
 
+
+    // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
     if (runner == nullptr) {
-      runner = get_thread_local_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+      runner = get_global_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
     }
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
@@ -710,7 +719,7 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data, void *shared_runner, void *shared_runn
 
     bool reconstruction_seen = false;
 
-    while (true) {
+    for (int i = 0; i < 1000; ++i) { // Safety limit to prevent infinite loop
       JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
 
       if (status == JXL_DEC_ERROR) {
@@ -742,9 +751,13 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data, void *shared_runner, void *shared_runn
         }
         continue;
       }
+      if (status == JXL_DEC_NEED_MORE_INPUT) {
+        break;
+      }
       if (status == JXL_DEC_FULL_IMAGE) {
         continue;
       }
+
       break;
     }
 
@@ -754,11 +767,13 @@ py::bytes jxl_to_jpeg(py::bytes jxl_data, void *shared_runner, void *shared_runn
 
     jpeg_data.resize(jpeg_pos);
   }
-  return py::bytes(reinterpret_cast<const char *>(jpeg_data.data()), jpeg_data.size());
+  return nb::bytes(reinterpret_cast<const char *>(jpeg_data.data()), jpeg_data.size());
 }
 
 class PyJxlCodec {
 public:
+  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-member-init)
+
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-member-init)
   PyJxlCodec(int effort = 7,
              float distance = 1.0F,
@@ -789,14 +804,14 @@ public:
   PyJxlCodec &operator=(PyJxlCodec &&) = delete;
 
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  py::bytes encode_image(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
+  nb::bytes encode_image(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                          std::optional<int> effort,
                          std::optional<float> distance,
                          std::optional<bool> lossless,
                          std::optional<int> decoding_speed,
-                         py::object exif,
-                         py::object xmp,
-                         py::object jumbf) {
+                         nb::handle exif,
+                         nb::handle xmp,
+                         nb::handle jumbf) {
     check_closed();
     int eff = effort.value_or(effort_);
     bool ll = lossless.value_or(lossless_);
@@ -805,30 +820,30 @@ public:
     return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, runner_.get(), &mutex_);
   }
 
-  py::object decode_image(py::bytes data, bool metadata) {
+  nb::object decode_image(nb::bytes data, bool metadata) {
     check_closed();
     return decode_impl(data, metadata, runner_.get(), &mutex_);
   }
 
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  py::bytes encode_jpeg_image(py::array_t<uint8_t, py::array::c_style | py::array::forcecast> input,
+  nb::bytes encode_jpeg_image(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                               int quality) {
     check_closed();
     return encode_jpeg(input, quality);
   }
 
-  py::array_t<uint8_t> decode_jpeg_image(py::bytes data) {
+  nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> decode_jpeg_image(nb::bytes data) {
     check_closed();
     return decode_jpeg(data);
   }
 
   // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-  py::bytes jpeg_to_jxl_image(py::bytes jpeg_data, std::optional<int> effort) {
+  nb::bytes jpeg_to_jxl_image(nb::bytes jpeg_data, std::optional<int> effort) {
     check_closed();
     return jpeg_to_jxl(jpeg_data, effort.value_or(effort_), runner_.get(), &mutex_);
   }
 
-  py::bytes jxl_to_jpeg_image(py::bytes jxl_data) {
+  nb::bytes jxl_to_jpeg_image(nb::bytes jxl_data) {
     check_closed();
     return jxl_to_jpeg(jxl_data, runner_.get(), &mutex_);
   }
@@ -838,11 +853,7 @@ public:
     return *this;
   }
 
-  void exit(const py::object & /*exc_type*/,
-            const py::object & /*exc_val*/,
-            const py::object & /*exc_tb*/) {
-    close();
-  }
+  void exit(nb::handle /*exc_type*/, nb::handle /*exc_val*/, nb::handle /*exc_tb*/) { close(); }
 
   void close() {
     closed_ = true;
@@ -869,15 +880,17 @@ private:
 
 } // namespace
 
-PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
+NB_MODULE(_pylibjxl, m) { // NOLINT
   m.doc() = "Python bindings for libjxl";
 
   m.def(
       "version",
       []() {
-        return py::dict("major"_a = JPEGXL_MAJOR_VERSION,
-                        "minor"_a = JPEGXL_MINOR_VERSION,
-                        "patch"_a = JPEGXL_PATCH_VERSION);
+        nb::dict d;
+        d["major"] = JPEGXL_MAJOR_VERSION;
+        d["minor"] = JPEGXL_MINOR_VERSION;
+        d["patch"] = JPEGXL_PATCH_VERSION;
+        return d;
       },
       "Get libjxl version");
 
@@ -901,9 +914,9 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
         "distance"_a = 1.0F,
         "lossless"_a = false,
         "decoding_speed"_a = 0,
-        "exif"_a = py::none(),
-        "xmp"_a = py::none(),
-        "jumbf"_a = py::none());
+        "exif"_a = nb::none(),
+        "xmp"_a = nb::none(),
+        "jumbf"_a = nb::none());
 
   m.def("decode",
         &decode,
@@ -916,7 +929,7 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
         "data"_a,
         "metadata"_a = false);
 
-  py::class_<PyJxlCodec>(m,
+  nb::class_<PyJxlCodec>(m,
                          "JXL",
                          "Unified JXL/JPEG codec with context manager support.\n\n"
                          "Owns a shared thread pool that is destroyed on close().\n"
@@ -930,7 +943,7 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
                          "        img = jxl.decode_jpeg(jpeg)\n"
                          "        jxl_data = jxl.jpeg_to_jxl(jpeg)\n"
                          "        jpeg_back = jxl.jxl_to_jpeg(jxl_data)\n")
-      .def(py::init<int, float, bool, int, int>(),
+      .def(nb::init<int, float, bool, int, int>(),
            "effort"_a = 7,
            "distance"_a = 1.0F,
            "lossless"_a = false,
@@ -941,13 +954,13 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
            "Encode a numpy array to JXL bytes.\n\n"
            "Per-call overrides take precedence over constructor defaults.",
            "input"_a,
-           "effort"_a = py::none(),
-           "distance"_a = py::none(),
-           "lossless"_a = py::none(),
-           "decoding_speed"_a = py::none(),
-           "exif"_a = py::none(),
-           "xmp"_a = py::none(),
-           "jumbf"_a = py::none())
+           "effort"_a = nb::none(),
+           "distance"_a = nb::none(),
+           "lossless"_a = nb::none(),
+           "decoding_speed"_a = nb::none(),
+           "exif"_a = nb::none(),
+           "xmp"_a = nb::none(),
+           "jumbf"_a = nb::none())
       .def("decode",
            &PyJxlCodec::decode_image,
            "Decode JXL bytes, optionally extracting metadata.",
@@ -966,15 +979,19 @@ PYBIND11_MODULE(_pylibjxl, m) { // NOLINT
            &PyJxlCodec::jpeg_to_jxl_image,
            "Losslessly recompress JPEG bytes to JXL bytes.",
            "data"_a,
-           "effort"_a = py::none())
+           "effort"_a = nb::none())
       .def("jxl_to_jpeg",
            &PyJxlCodec::jxl_to_jpeg_image,
            "Reconstruct original JPEG bytes from JXL bytes.",
            "data"_a)
       .def("close", &PyJxlCodec::close, "Close the codec and release thread pool resources.")
-      .def_property_readonly("closed", &PyJxlCodec::closed, "Whether the codec has been closed.")
-      .def("__enter__", &PyJxlCodec::enter, py::return_value_policy::reference)
-      .def("__exit__", &PyJxlCodec::exit);
+      .def_prop_ro("closed", &PyJxlCodec::closed, "Whether the codec has been closed.")
+      .def("__enter__", &PyJxlCodec::enter, nb::rv_policy::reference)
+      .def("__exit__",
+           &PyJxlCodec::exit,
+           nb::arg("exc_type") = nb::none(),
+           nb::arg("exc_val") = nb::none(),
+           nb::arg("exc_tb") = nb::none());
 
   m.def("encode_jpeg",
         &encode_jpeg,

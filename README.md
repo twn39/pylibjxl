@@ -11,7 +11,7 @@
 
 ---
 
-`pylibjxl` provides efficient, high-performance Python bindings for [libjxl](https://github.com/libjxl/libjxl) and [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo). Built with [pybind11](https://github.com/pybind/pybind11), it features **GIL-free** encoding/decoding and **native async** support for maximum throughput.
+`pylibjxl` provides efficient, high-performance Python bindings for [libjxl](https://github.com/libjxl/libjxl) and [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo). Built with [nanobind](https://github.com/wjakob/nanobind), it features **GIL-free** encoding/decoding and **native async** support for maximum throughput.
 
 </div>
 

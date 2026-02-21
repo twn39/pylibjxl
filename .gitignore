@@ -12,3 +12,6 @@ wheels/
 .pytest_cache
 
 .coverage
+.benchmarks
+.ruff_cache
+htmlcov

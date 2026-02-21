@@ -93,11 +93,12 @@ set(JPEGXL_ENABLE_GDKPIXBUF OFF CACHE BOOL "" FORCE)
 # Add libjxl
 add_subdirectory(third_party/libjxl)
 
-# Add pybind11
-find_package(pybind11 REQUIRED)
+# Add nanobind
+find_package(Python COMPONENTS Interpreter Development REQUIRED)
+add_subdirectory(third_party/nanobind)
 
 # Define the extension module
-pybind11_add_module(_pylibjxl src/main.cpp)
+nanobind_add_module(_pylibjxl src/main.cpp)
 
 # Link with libjxl and turbojpeg
 # Ensure headers are found globally

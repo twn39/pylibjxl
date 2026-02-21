@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core", "pybind11"]
+requires = ["scikit-build-core"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -12,7 +12,7 @@ authors = [
     { name = "curry tang", email = "twn39@163.com" }
 ]
 requires-python = ">=3.11, <3.15"
-keywords = ["jpeg-xl", "jxl", "jpeg", "libjxl", "libjpeg-turbo", "pybind11", "numpy", "asyncio", "image-processing"]
+keywords = ["jpeg-xl", "jxl", "jpeg", "libjxl", "libjpeg-turbo", "nanobind", "numpy", "asyncio", "image-processing"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

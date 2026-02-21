@@ -5,7 +5,7 @@
 `pylibjxl` provides high-performance Python bindings for **JPEG XL (libjxl)** and **JPEG (libjpeg-turbo)**. It is designed for speed, efficiency, and seamless integration with the Python ecosystem, particularly for heavy image processing tasks.
 
 ### Key Technologies
-- **C++ Core**: Uses `pybind11` for bindings and releases the Python Global Interpreter Lock (GIL) during heavy computation to enable true multi-core parallelism.
+- **C++ Core**: Uses `nanobind` for bindings and releases the Python Global Interpreter Lock (GIL) during heavy computation to enable true multi-core parallelism.
 - **Python Layer**: Provides high-level APIs, including native `asyncio` support via `asyncio.to_thread`.
 - **Image Data**: Uses `numpy.ndarray` (uint8) as the primary image representation.
 - **Build System**: Powered by `scikit-build-core` and `CMake`.
