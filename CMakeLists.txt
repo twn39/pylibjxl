@@ -39,26 +39,17 @@ set(SKIP_INSTALL_HEADERS TRUE)
 set(SKIP_INSTALL_EXECUTABLES TRUE)
 set(SKIP_INSTALL_FILES TRUE)
 
-# Apply patch to libjpeg-turbo
-find_package(Git REQUIRED)
-execute_process(
-    COMMAND ${GIT_EXECUTABLE} apply --check ${CMAKE_CURRENT_SOURCE_DIR}/patches/libjpeg-turbo.patch
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo
-    RESULT_VARIABLE patch_check_result
-    OUTPUT_QUIET ERROR_QUIET
+# Apply inline patch to libjpeg-turbo to bypass add_subdirectory fatal error
+set(JPEG_TURBO_CMAKELISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo/CMakeLists.txt")
+file(READ "${JPEG_TURBO_CMAKELISTS}" _jpeg_turbo_content)
+string(REPLACE 
+    "message(FATAL_ERROR \"The libjpeg-turbo build system cannot be integrated into another build system using add_subdirectory().  Use ExternalProject_Add() instead.\")"
+    "message(STATUS \"Bypassing libjpeg-turbo add_subdirectory() safeguard for pylibjxl.\")"
+    _jpeg_turbo_content_patched "${_jpeg_turbo_content}"
 )
-if(patch_check_result EQUAL 0)
-    message(STATUS "Applying libjpeg-turbo patch...")
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/libjpeg-turbo.patch
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo
-        RESULT_VARIABLE patch_apply_result
-    )
-    if(NOT patch_apply_result EQUAL 0)
-        message(FATAL_ERROR "Failed to apply libjpeg-turbo patch")
-    endif()
-else()
-    message(STATUS "libjpeg-turbo patch seems to be already applied or inapplicable.")
+if(NOT _jpeg_turbo_content STREQUAL _jpeg_turbo_content_patched)
+    message(STATUS "Applying inline patch to libjpeg-turbo CMakeLists.txt...")
+    file(WRITE "${JPEG_TURBO_CMAKELISTS}" "${_jpeg_turbo_content_patched}")
 endif()
 
 add_subdirectory(third_party/libjpeg-turbo)
