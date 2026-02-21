@@ -85,7 +85,7 @@ set(JPEGXL_ENABLE_GDKPIXBUF OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/libjxl)
 
 # Add nanobind
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 add_subdirectory(third_party/nanobind)
 
 # Define the extension module
