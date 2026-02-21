@@ -26,7 +26,6 @@ jobs:
           CIBW_ARCHS_LINUX: auto
           CIBW_ARCHS_MACOS: x86_64 arm64
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=14.0
-          CIBW_BEFORE_BUILD: "pip install uv && uv pip install -e . --system"
           CIBW_TEST_REQUIRES: "pytest pytest-asyncio pytest-benchmark pytest-cov pillow"
           CIBW_TEST_COMMAND: "pytest {project}/tests"
 
@@ -43,12 +42,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Build sdist
-        run: pipx run build --sdist
+        run: uv build --sdist
 
       - name: Quick install check
         run: |
-          pip install uv
           uv venv
           uv pip install numpy
           uv pip install dist/*.tar.gz
