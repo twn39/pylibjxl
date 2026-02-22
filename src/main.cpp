@@ -54,15 +54,6 @@ struct TjFree {
 };
 using TjBufPtr = std::unique_ptr<unsigned char, TjFree>;
 
-// Use a global shared runner for free functions to avoid thread_local issues on Windows,
-// especially when used with thread pools (asyncio.to_thread).
-// Access is serialized via global_runner_mutex because JxlResizableParallelRunner is not
-// thread-safe.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-JxlRunnerPtr global_runner;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::mutex global_runner_mutex;
-
 size_t suggest_threads(uint64_t xsize, uint64_t ysize) {
   size_t threads = JxlResizableParallelRunnerSuggestThreads(xsize, ysize);
   if (threads == 0) {
@@ -71,18 +62,18 @@ size_t suggest_threads(uint64_t xsize, uint64_t ysize) {
   return threads;
 }
 
-void *get_global_runner(size_t threads) {
-  if (global_runner == nullptr) {
-    global_runner.reset(JxlResizableParallelRunnerCreate(nullptr));
-  }
-  if (global_runner == nullptr) {
-    return nullptr;
+// Create a local runner for the current invocation.
+// This avoids the need for a global lock and enables true parallel execution.
+JxlRunnerPtr make_local_runner(size_t threads) {
+  JxlRunnerPtr runner(JxlResizableParallelRunnerCreate(nullptr));
+  if (runner == nullptr) {
+    throw std::runtime_error("JxlResizableParallelRunnerCreate failed");
   }
   if (threads == 0) {
     threads = 1;
   }
-  JxlResizableParallelRunnerSetThreads(global_runner.get(), threads);
-  return global_runner.get();
+  JxlResizableParallelRunnerSetThreads(runner.get(), threads);
+  return std::move(runner); // NOLINT(performance-move-const-arg)
 }
 
 std::vector<uint8_t> extract_optional_bytes(const nb::handle &obj) {
@@ -136,23 +127,19 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
   std::vector<uint8_t> compressed;
   {
     nb::gil_scoped_release release;
-    // If a shared runner is provided, we must serialize access to it because
-    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
-    // If no shared runner is provided (free functions), we use a global shared runner.
+
+    // If a shared runner is provided (PyJxlCodec), serialize access via its mutex.
+    // Otherwise (free functions), create a per-invocation local runner for true parallelism.
     std::unique_lock<std::mutex> lock;
-
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (shared_runner_mutex != nullptr) {
-      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
-    } else {
-      lock = std::unique_lock<std::mutex>(global_runner_mutex);
-    }
-
+    JxlRunnerPtr local_runner;
 
     // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
-    if (runner == nullptr) {
-      runner = get_global_runner(suggest_threads(width, height));
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else if (runner == nullptr) {
+      local_runner = make_local_runner(suggest_threads(width, height));
+      runner = local_runner.get();
     }
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
@@ -309,20 +296,18 @@ decode_impl(nb::bytes data, bool metadata, void *shared_runner, void *shared_run
   {
     nb::gil_scoped_release release;
 
+    // If a shared runner is provided (PyJxlCodec), serialize access via its mutex.
+    // Otherwise (free functions), create a per-invocation local runner for true parallelism.
     std::unique_lock<std::mutex> lock;
-
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (shared_runner_mutex != nullptr) {
-      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
-    } else {
-      lock = std::unique_lock<std::mutex>(global_runner_mutex);
-    }
-
+    JxlRunnerPtr local_runner;
 
     // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
-    if (runner == nullptr) {
-      runner = get_global_runner(0);
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else if (runner == nullptr) {
+      local_runner = make_local_runner(suggest_threads(0, 0));
+      runner = local_runner.get();
     }
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
@@ -561,8 +546,6 @@ nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> decode_jpeg(nb::bytes data) {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   size_t shape[3] = {static_cast<size_t>(height), static_cast<size_t>(width), 3};
   nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] (uint8_t *)p; });
   temp_owner.release();
@@ -589,23 +572,19 @@ jpeg_to_jxl(nb::bytes jpeg_data, int effort, void *shared_runner, void *shared_r
   std::vector<uint8_t> compressed;
   {
     nb::gil_scoped_release release;
-    // If a shared runner is provided, we must serialize access to it because
-    // JxlResizableParallelRunner is not thread-safe for concurrent calls.
-    // If no shared runner is provided (free functions), we use a global shared runner.
+
+    // If a shared runner is provided (PyJxlCodec), serialize access via its mutex.
+    // Otherwise (free functions), create a per-invocation local runner for true parallelism.
     std::unique_lock<std::mutex> lock;
-
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (shared_runner_mutex != nullptr) {
-      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
-    } else {
-      lock = std::unique_lock<std::mutex>(global_runner_mutex);
-    }
-
+    JxlRunnerPtr local_runner;
 
     // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
-    if (runner == nullptr) {
-      runner = get_global_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else if (runner == nullptr) {
+      local_runner = make_local_runner(suggest_threads(1024, 1024));
+      runner = local_runner.get();
     }
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
@@ -663,8 +642,6 @@ jpeg_to_jxl(nb::bytes jpeg_data, int effort, void *shared_runner, void *shared_r
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-non-const-global-variables)
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity,bugprone-easily-swappable-parameters)
 nb::bytes jxl_to_jpeg(nb::bytes jxl_data, void *shared_runner, void *shared_runner_mutex) {
   char *raw_ptr = nullptr; // NOLINT
   Py_ssize_t raw_size = 0;
@@ -677,20 +654,19 @@ nb::bytes jxl_to_jpeg(nb::bytes jxl_data, void *shared_runner, void *shared_runn
   std::vector<uint8_t> jpeg_data;
   {
     nb::gil_scoped_release release;
+
+    // If a shared runner is provided (PyJxlCodec), serialize access via its mutex.
+    // Otherwise (free functions), create a per-invocation local runner for true parallelism.
     std::unique_lock<std::mutex> lock;
-
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (shared_runner_mutex != nullptr) {
-      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
-    } else {
-      lock = std::unique_lock<std::mutex>(global_runner_mutex);
-    }
-
+    JxlRunnerPtr local_runner;
 
     // NOLINTNEXTLINE(misc-const-correctness)
     void *runner = shared_runner;
-    if (runner == nullptr) {
-      runner = get_global_runner(JxlResizableParallelRunnerSuggestThreads(1024, 1024));
+    if (shared_runner_mutex != nullptr) {
+      lock = std::unique_lock<std::mutex>(*static_cast<std::mutex *>(shared_runner_mutex));
+    } else if (runner == nullptr) {
+      local_runner = make_local_runner(suggest_threads(1024, 1024));
+      runner = local_runner.get();
     }
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
