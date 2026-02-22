@@ -22,7 +22,7 @@
 - ⚡ **Async-First** — Native `asyncio` integration for non-blocking I/O.
 - 🖼️ **NumPy Native** — Directly encode from and decode to `ndarray` (RGB/RGBA).
 - 🔄 **Lossless JPEG Transcoding** — Bit-perfect JPEG ↔ JXL roundtrips.
-- 🎯 **Thread-Safe** — Persistent thread pools with resource control via `threads` parameter.
+- 🎯 **Thread-Safe** — `RunnerPool` enables true concurrent encode/decode with controlled resources.
 
 ---
 
@@ -120,9 +120,10 @@ import numpy as np
 
 app = FastAPI()
 
-# Create a single shared runner with a fixed thread pool (e.g., 8 threads).
-# This prevents thread explosion even if 1000 requests arrive simultaneously.
-runner = pylibjxl.AsyncJXL(threads=8)
+# Create a shared async codec with a RunnerPool.
+# The pool holds N independent runners (N = CPU cores by default).
+# Concurrent requests each acquire their own runner — true parallel encoding!
+runner = pylibjxl.AsyncJXL()
 
 @app.on_event("startup")
 async def startup():
@@ -137,9 +138,8 @@ async def encode_image(file: UploadFile):
     # Read bytes (non-blocking)
     content = await file.read()
     
-    # Offload decoding to the shared C++ runner (releases GIL)
-    # Concurrent requests will be serialized at the runner level if needed,
-    # preventing CPU oversubscription while keeping the event loop responsive.
+    # Multiple requests run truly in parallel — each gets its own runner from the pool.
+    # No global lock, no CPU oversubscription.
     image = await runner.decode_jpeg_async(content)
     
     # Process image...
@@ -162,27 +162,38 @@ Both libraries are tested using the same `effort` parameter (1-11) to ensure a f
 
 | Effort Level | pylibjxl | pillow-jxl-plugin | Scaling |
 |:---|:---|:---|:---|
-| **Effort 1 (Fastest)** | **~14.1 ms** | ~13.2 ms | Low latency |
-| **Effort 4 (Balanced)** | **~25.4 ms** | ~21.8 ms | Optimal mix |
-| **Effort 7 (Default)** | **~100.8 ms** | ~94.1 ms | Best compression |
+| **Effort 1 (Fastest)** | **~20.7 ms** | ~13.2 ms | Low latency |
+| **Effort 4 (Balanced)** | **~39.2 ms** | ~21.9 ms | Optimal mix |
+| **Effort 7 (Default)** | **~275.1 ms** | ~94.0 ms | Best compression |
 
 #### Decoding Performance
 | Format | pylibjxl | pillow-jxl-plugin / PIL | Improvement |
 |:---|:---|:---|:---|
-| **JXL Decode** | **8.8 ms** | 11.9 ms | **~26% Faster** |
-| **JPEG Decode** | **17.0 ms** | 18.2 ms | **~7% Faster** |
+| **JXL Decode** | **24.5 ms** | 11.0 ms | |
+| **JPEG Decode** | **17.0 ms** | 18.4 ms | **~8% Faster** |
 
 ### 🛠️ Architecture Highlights
 
 - **GIL-Free Execution**: The C++ core releases Python's Global Interpreter Lock (GIL) during all heavy encoding and decoding tasks. This allows for **true multi-core parallelism** when using Python's `threading` or `concurrent.futures`.
+- **RunnerPool**: A thread-safe pool of `JxlResizableParallelRunner` instances. Each concurrent operation acquires its own runner from the pool, enabling **true parallel encode/decode** without any global lock. Pool size defaults to `hardware_concurrency()`.
 - **Native Async Support**: Unlike standard Pillow-based plugins, `pylibjxl` provides native `asyncio` bindings. This prevents event-loop blocking in high-concurrency web servers (e.g., FastAPI, Tornado).
 - **Zero Memory Leaks**: Extensive stability testing (500+ consecutive rounds) shows that memory usage stabilizes after initial warm-up, with no ongoing growth.
 - **Optimized Memory Management**: 
     - **Adaptive Buffering**: Employs an intelligent buffer growth strategy during encoding to minimize reallocations while handling high-entropy images.
-    - **Runner Reuse**: The `JXL` context manager maintains a persistent thread pool, eliminating the overhead of creating/destroying threads for every call.
+    - **RunnerPool Reuse**: Both `JXL`/`AsyncJXL` context managers and free functions reuse pooled runners, eliminating the overhead of creating/destroying thread pools per call.
 
-> [!IMPORTANT]
-> For **maximum parallel throughput** in multi-threaded environments, use the free functions (`pylibjxl.encode`, `pylibjxl.decode`). For **maximum serial speed** in batch processing, use the `JXL` context manager to reuse the thread pool.
+#### Concurrent Throughput
+*Tested on Apple M2 Pro (1440x960 RGB Image, effort=3)*
+
+| Concurrent Tasks | Encode (ops/sec) | Decode (ops/sec) |
+|:---:|:---:|:---:|
+| 1 | 18 | 22 |
+| 4 | 66 | 89 |
+| 8 | **109** | **148** |
+| 16 | 104 | **164** |
+
+> [!TIP]
+> Both free functions (`pylibjxl.encode_async`) and context managers (`AsyncJXL.encode_async`) now support **true parallel execution** via `RunnerPool`. Use context managers for batch workflows and free functions for ad-hoc operations.
 
 ---
 
@@ -358,7 +369,7 @@ Sync and Async context managers that maintain a persistent thread pool.
 | `distance` | `float` | `1.0` | Default distance for operations. |
 | `lossless` | `bool` | `False` | Default lossless mode. |
 | `decoding_speed` | `int` | `0` | Default decoding speed tier. |
-| `threads` | `int` | `0` | Number of worker threads for the shared pool (0 = auto). |
+| `threads` | `int` | `0` | Threads per runner in the pool (0 = auto). The pool size equals CPU core count. |
 
 ```python
 with pylibjxl.JXL(effort=7) as jxl:

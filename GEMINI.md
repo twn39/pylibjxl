@@ -15,12 +15,14 @@
 
 - **`src/main.cpp`**: The C++ entry point. Defines the `_pylibjxl` extension module.
     - Implements GIL-free encoding and decoding.
-    - Uses `JxlResizableParallelRunner` with `thread_local` storage for efficient multi-threading.
+    - Uses `RunnerPool` — a thread-safe pool of `JxlResizableParallelRunner` instances for true concurrent parallelism.
+    - `RunnerGuard` provides RAII-based acquire/release of runners from the pool.
+    - Free functions (`encode`, `decode`, etc.) use a lazily-initialized global `RunnerPool`.
     - Handles EXIF, XMP, and JUMBF metadata boxes.
 - **`src/pylibjxl/__init__.py`**: The Python wrapper.
     - Maps low-level C++ functions to a user-friendly API.
     - Implements `encode_async`, `decode_async`, and other `_async` variants using `asyncio.to_thread`.
-    - Provides `JXL` (sync) and `AsyncJXL` (async) context managers for persistent thread pool reuse, allowing explicit control over worker threads to prevent resource exhaustion in concurrent environments.
+    - Provides `JXL` (sync) and `AsyncJXL` (async) context managers, each owning a private `RunnerPool` for controlled resource usage.
 - **`third_party/`**: Contains submodules for `libjxl` and `libjpeg-turbo`.
 
 ## Building and Running
@@ -62,6 +64,14 @@ uv run pytest --cov=pylibjxl
 
 ### GIL Management
 Always release the GIL in C++ for any operation that takes significant time (encoding, decoding, transcoding). This allows Python's threading to work effectively.
+
+### Concurrency Model (RunnerPool)
+`JxlResizableParallelRunner` is **not thread-safe** — two concurrent operations cannot share the same runner. `RunnerPool` solves this by maintaining a pool of independent runners:
+- **`RunnerPool(pool_size, threads_per_runner)`**: Creates `pool_size` runner instances, each with `threads_per_runner` internal threads.
+- **`acquire()` / `release()`**: Thread-safe borrow/return operations. `acquire()` blocks via `condition_variable` if no runners are available.
+- **`RunnerGuard`**: RAII wrapper that calls `acquire()` on construction and `release()` on destruction, ensuring exception safety.
+- **Global pool** (`global_pool()`): Lazily initialized with `pool_size = hardware_concurrency()` and `threads_per_runner = 1`, used by free functions.
+- **`PyJxlCodec` pool**: Each `JXL`/`AsyncJXL` instance owns a private pool, allowing true parallel encode/decode within a single context manager.
 
 ### Async Patterns
 Prefer `asyncio.to_thread` in the Python layer for I/O and CPU-bound tasks that release the GIL, ensuring the event loop remains responsive.
