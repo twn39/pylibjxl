@@ -100,22 +100,21 @@ public:
   ~RunnerPool() = default;
 
   // Acquire a runner from the pool. Blocks if none are available.
-  void *acquire() {
+  JxlRunnerPtr acquire() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return !pool_.empty(); });
     JxlRunnerPtr runner = std::move(pool_.back());
     pool_.pop_back();
-    void *raw = runner.release(); // transfer ownership to caller
-    return raw;
+    return runner;
   }
 
   // Release a runner back to the pool.
-  void release(void *runner) {
+  void release(JxlRunnerPtr runner) {
     if (runner == nullptr) {
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
-    pool_.emplace_back(runner);
+    pool_.emplace_back(std::move(runner));
     cv_.notify_one();
   }
 
@@ -135,18 +134,18 @@ private:
 class RunnerGuard {
 public:
   explicit RunnerGuard(RunnerPool &pool) : pool_(pool), runner_(pool.acquire()) {}
-  ~RunnerGuard() { pool_.release(runner_); }
+  ~RunnerGuard() { pool_.release(std::move(runner_)); }
 
   RunnerGuard(const RunnerGuard &) = delete;
   RunnerGuard &operator=(const RunnerGuard &) = delete;
   RunnerGuard(RunnerGuard &&) = delete;
   RunnerGuard &operator=(RunnerGuard &&) = delete;
 
-  [[nodiscard]] void *get() const { return runner_; }
+  [[nodiscard]] void *get() const { return runner_.get(); }
 
 private:
   RunnerPool &pool_;
-  void *runner_;
+  JxlRunnerPtr runner_;
 };
 
 // Global runner pool for free functions (lazily initialized).

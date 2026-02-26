@@ -15,3 +15,5 @@ wheels/
 .benchmarks
 .ruff_cache
 htmlcov
+.DS_Store
+.cache
