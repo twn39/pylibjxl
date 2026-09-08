@@ -18,9 +18,12 @@
 ## ✨ Key Features
 
 - 🚀 **High Performance** — C++ core releases the GIL during heavy computation for true multi-core scaling.
+- 🔍 **Ultra-Fast Probing** — Extract JXL metadata (width, height, channels, bits) in **< 0.05ms** (~20μs) without decoding pixel buffers.
+- 🖼️ **Seamless Pillow Plugin** — Transparent `register_pillow()` with true lazy loading (`probe`), full EXIF/ICC preservation, and fast saving.
+- 🐍 **Broad Python Compatibility** — First-class support for Python 3.11, 3.12, 3.13, and **Python 3.14**.
 - 📦 **Metadata Excellence** — Full support for EXIF, XMP, and JUMBF metadata, plus ICC color profile management.
 - ⚡ **Async-First & Backpressure** — Native `asyncio` integration with double-layer semaphore backpressure for web services.
-- 🎯 **Elastic RunnerPool** — On-demand dynamic expansion, idle runner reaping, and timeout protection (`CodecTimeoutError`).
+- 🎯 **Elastic RunnerPool & Memory Pooling** — Dynamic pool scaling, idle runner reaping, watermark buffer pooling, and timeout protection (`CodecTimeoutError`).
 - 🖼️ **NumPy Native & Zero-Copy** — In-place decode (`out=array`) and Buffer Protocol support for zero memory allocation.
 - 🔄 **Lossless JPEG Transcoding** — Bit-perfect JPEG ↔ JXL roundtrips without pixel decoding.
 
@@ -360,6 +363,44 @@ await pylibjxl.write_async("output.jxl", image, lossless=True)
 
 ---
 
+### 🔍 Ultra-Fast Image Probing
+
+#### `probe(data) -> dict` / `async probe_async(...) -> dict`
+Extracts image dimensions, channels, bit depth, and suggested threads in **< 0.05ms** (~20μs) without decoding pixel buffers or allocating runner threads.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | `bytes | Buffer` | *required* | JPEG XL encoded bytes or any buffer object. |
+
+Returns a dictionary:
+```python
+{
+    "width": 1920,
+    "height": 1080,
+    "channels": 3,
+    "has_alpha": False,
+    "bits_per_sample": 8,
+    "suggested_threads": 2,
+}
+```
+
+---
+
+#### `probe_file(path, *, use_mmap=True) -> dict`
+Probes image metadata directly from a file path.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `path` | `str | Path` | *required* | Path to the source `.jxl` file. |
+| `use_mmap` | `bool` | `True` | Use zero-copy memory mapping for probe header reads. |
+
+```python
+info = pylibjxl.probe_file("photo.jxl", use_mmap=True)
+print(f"{info['width']}x{info['height']}, {info['channels']} channels")
+```
+
+---
+
 ### 📷 JPEG Support (libjpeg-turbo)
 
 #### `encode_jpeg(input, quality=95) -> bytes` / `async encode_jpeg_async(...)`
@@ -468,6 +509,32 @@ with pylibjxl.JXL(effort=7, pool_size=4, timeout=5.0) as jxl:
     img = jxl.read("input.jxl")
     jxl.write("output.jxl", img, distance=0.5)
     print(f"Active runners: {jxl.in_use_runners}/{jxl.total_runners}")
+```
+
+---
+
+### 🖼️ Pillow Plugin Integration
+
+#### `register_pillow(*, override=True)`
+Registers `pylibjxl` as the JPEG XL (`.jxl`) image format plugin for [Pillow](https://python-pillow.org/).
+
+- **True Lazy Loading**: `Image.open()` leverages `probe` to read dimensions instantly (< 0.05ms) without decoding pixel buffers until accessed.
+- **Comprehensive Modes**: Supports `RGB`, `RGBA`, `L` (Grayscale), `LA`, and Palette (`P`) modes with automatic conversions.
+- **Metadata Roundtrip**: Preserves and restores EXIF (`im.info["exif"]`) and ICC profiles (`im.info["icc_profile"]`).
+- **Idempotent**: Safe to call repeatedly; `override=True` replaces any previously registered JXL handlers.
+
+```python
+import pylibjxl
+from PIL import Image
+
+# Register plugin
+pylibjxl.register_pillow()
+
+# Standard Pillow operations
+with Image.open("input.jxl") as im:
+    print(im.size, im.mode)  # Lazy loaded, <0.05ms
+    im_thumb = im.resize((128, 128))
+    im_thumb.save("thumb.jxl", effort=7, quality=90)
 ```
 
 ---
