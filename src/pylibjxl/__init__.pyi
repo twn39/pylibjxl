@@ -19,6 +19,7 @@ def encode(
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
+    icc: Optional[bytes] = None,
 ) -> bytes: ...
 
 @overload
@@ -46,6 +47,7 @@ class _JXL:
         exif: Optional[bytes] = None,
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
+        icc: Optional[bytes] = None,
     ) -> bytes: ...
     
     @overload
@@ -77,6 +79,7 @@ async def encode_async(
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
+    icc: Optional[bytes] = None,
 ) -> bytes: ...
 
 @overload
@@ -104,6 +107,7 @@ def write(
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
+    icc: Optional[bytes] = None,
 ) -> None: ...
 
 @overload
@@ -124,6 +128,7 @@ async def write_async(
     exif: Optional[bytes] = None,
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
+    icc: Optional[bytes] = None,
 ) -> None: ...
 
 class JXL(_JXL):
@@ -146,6 +151,7 @@ class JXL(_JXL):
         exif: Optional[bytes] = None,
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
+        icc: Optional[bytes] = None,
     ) -> None: ...
 
     def read_jpeg(self, path: Union[str, Path]) -> npt.NDArray[np.uint8]: ...
@@ -169,6 +175,7 @@ class AsyncJXL(_JXL):
         exif: Optional[bytes] = None,
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
+        icc: Optional[bytes] = None,
     ) -> bytes: ...
 
     @overload
@@ -197,6 +204,7 @@ class AsyncJXL(_JXL):
         exif: Optional[bytes] = None,
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
+        icc: Optional[bytes] = None,
     ) -> None: ...
 
     async def encode_jpeg_async(self, input: npt.NDArray[np.uint8], quality: int = 95) -> bytes: ...

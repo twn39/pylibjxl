@@ -59,6 +59,7 @@ async def encode_async(
     exif=None,
     xmp=None,
     jumbf=None,
+    icc=None,
 ):
     """
     Asynchronously encode a numpy array (H, W, C) to JXL bytes.
@@ -74,6 +75,7 @@ async def encode_async(
         exif,
         xmp,
         jumbf,
+        icc,
     )
 
 
@@ -119,6 +121,7 @@ def write(
     exif=None,
     xmp=None,
     jumbf=None,
+    icc=None,
 ):
     """Encode a numpy array and write it to a JXL file.
 
@@ -132,11 +135,12 @@ def write(
         exif: Optional EXIF metadata as bytes.
         xmp: Optional XMP metadata as bytes.
         jumbf: Optional JUMBF metadata as bytes.
+        icc: Optional ICC profile metadata as bytes.
     """
     filepath = Path(path)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     data = encode(
-        image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf
+        image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc
     )
     filepath.write_bytes(data)
 
@@ -157,6 +161,7 @@ async def write_async(
     exif=None,
     xmp=None,
     jumbf=None,
+    icc=None,
 ):
     """Asynchronously encode a numpy array and write it to a JXL file."""
     return await asyncio.to_thread(
@@ -170,6 +175,7 @@ async def write_async(
         exif=exif,
         xmp=xmp,
         jumbf=jumbf,
+        icc=icc,
     )
 
 
@@ -225,12 +231,13 @@ class JXL(_JXL):
         exif=None,
         xmp=None,
         jumbf=None,
+        icc=None,
     ):
         """Encode a numpy array and write it to a JXL file."""
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         data = self.encode(
-            image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf
+            image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc
         )
         filepath.write_bytes(data)
 
@@ -318,6 +325,7 @@ class AsyncJXL(_JXL):
         exif=None,
         xmp=None,
         jumbf=None,
+        icc=None,
     ):
         """Asynchronously encode a numpy array to JXL bytes."""
         return await asyncio.to_thread(
@@ -330,6 +338,7 @@ class AsyncJXL(_JXL):
             exif,
             xmp,
             jumbf,
+            icc,
         )
 
     async def decode_async(self, data, *, metadata=False):
@@ -356,6 +365,7 @@ class AsyncJXL(_JXL):
         exif=None,
         xmp=None,
         jumbf=None,
+        icc=None,
     ):
         """Asynchronously encode and write to a JXL file."""
         data = await asyncio.to_thread(
@@ -368,6 +378,7 @@ class AsyncJXL(_JXL):
             exif,
             xmp,
             jumbf,
+            icc,
         )
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)

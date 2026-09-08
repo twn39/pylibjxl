@@ -39,20 +39,22 @@ set(SKIP_INSTALL_HEADERS TRUE)
 set(SKIP_INSTALL_EXECUTABLES TRUE)
 set(SKIP_INSTALL_FILES TRUE)
 
-# Apply inline patch to libjpeg-turbo to bypass add_subdirectory fatal error
+# Temporarily patch libjpeg-turbo CMakeLists.txt to allow add_subdirectory and restore immediately
 set(JPEG_TURBO_CMAKELISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo/CMakeLists.txt")
-file(READ "${JPEG_TURBO_CMAKELISTS}" _jpeg_turbo_content)
+file(READ "${JPEG_TURBO_CMAKELISTS}" _orig_content)
 string(REPLACE 
     "message(FATAL_ERROR \"The libjpeg-turbo build system cannot be integrated into another build system using add_subdirectory().  Use ExternalProject_Add() instead.\")"
     "message(STATUS \"Bypassing libjpeg-turbo add_subdirectory() safeguard for pylibjxl.\")"
-    _jpeg_turbo_content_patched "${_jpeg_turbo_content}"
+    _patched_content "${_orig_content}"
 )
-if(NOT _jpeg_turbo_content STREQUAL _jpeg_turbo_content_patched)
-    message(STATUS "Applying inline patch to libjpeg-turbo CMakeLists.txt...")
-    file(WRITE "${JPEG_TURBO_CMAKELISTS}" "${_jpeg_turbo_content_patched}")
-endif()
-
+string(REPLACE 
+    "message(FATAL_ERROR \"The \${CMAKE_PROJECT_NAME} build system cannot be integrated into another build system using add_subdirectory().  Use ExternalProject_Add() instead.\")"
+    "message(STATUS \"Bypassing libjpeg-turbo add_subdirectory() safeguard for pylibjxl.\")"
+    _patched_content "${_patched_content}"
+)
+file(WRITE "${JPEG_TURBO_CMAKELISTS}" "${_patched_content}")
 add_subdirectory(third_party/libjpeg-turbo)
+file(WRITE "${JPEG_TURBO_CMAKELISTS}" "${_orig_content}")
 
 # Expose libjpeg-turbo to libjxl (mock FindJPEG)
 set(JPEG_FOUND TRUE CACHE BOOL "" FORCE)
@@ -98,7 +100,7 @@ include_directories(
     "${CMAKE_CURRENT_BINARY_DIR}/third_party/libjpeg-turbo"
 )
 
-target_link_libraries(_pylibjxl PRIVATE jxl jxl_threads turbojpeg-static)
+target_link_libraries(_pylibjxl PRIVATE jxl jxl_cms jxl_threads turbojpeg-static)
 
 # Set target properties
 target_compile_features(_pylibjxl PRIVATE cxx_std_17)

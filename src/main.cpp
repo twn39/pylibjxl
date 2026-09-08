@@ -18,6 +18,7 @@
 #include <turbojpeg.h>
 #include <vector>
 
+#include <jxl/cms.h>
 #include <jxl/decode.h>
 #include <jxl/encode.h>
 #include <jxl/resizable_parallel_runner.h>
@@ -181,6 +182,7 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                       nb::handle exif,
                       nb::handle xmp,
                       nb::handle jumbf,
+                      nb::handle icc,
                       RunnerPool &pool) {
   if (input.ndim() != 3) {
     throw std::invalid_argument("Input must be a 3D array (height, width, channels), got ndim=" +
@@ -200,7 +202,9 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
   std::vector<uint8_t> exif_data = extract_optional_bytes(exif);
   std::vector<uint8_t> xmp_data = extract_optional_bytes(xmp);
   std::vector<uint8_t> jumbf_data = extract_optional_bytes(jumbf);
-  const bool has_metadata = !exif_data.empty() || !xmp_data.empty() || !jumbf_data.empty();
+  std::vector<uint8_t> icc_data = extract_optional_bytes(icc);
+  const bool has_metadata =
+      !exif_data.empty() || !xmp_data.empty() || !jumbf_data.empty() || !icc_data.empty();
 
   effort = std::clamp(effort, 1, 11);
   decoding_speed = std::clamp(decoding_speed, 0, 4);
@@ -263,10 +267,17 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
       throw std::runtime_error("JxlEncoderSetBasicInfo failed");
     }
 
-    JxlColorEncoding color_encoding = {};
-    JxlColorEncodingSetToSRGB(&color_encoding, JXL_FALSE);
-    if (JXL_ENC_SUCCESS != JxlEncoderSetColorEncoding(enc.get(), &color_encoding)) {
-      throw std::runtime_error("JxlEncoderSetColorEncoding failed");
+    if (!icc_data.empty()) {
+      if (JXL_ENC_SUCCESS !=
+          JxlEncoderSetICCProfile(enc.get(), icc_data.data(), icc_data.size())) {
+        throw std::runtime_error("JxlEncoderSetICCProfile failed");
+      }
+    } else {
+      JxlColorEncoding color_encoding = {};
+      JxlColorEncodingSetToSRGB(&color_encoding, channels == 1 ? JXL_TRUE : JXL_FALSE);
+      if (JXL_ENC_SUCCESS != JxlEncoderSetColorEncoding(enc.get(), &color_encoding)) {
+        throw std::runtime_error("JxlEncoderSetColorEncoding failed");
+      }
     }
 
     JxlPixelFormat pixel_format = {
@@ -341,9 +352,10 @@ nb::bytes encode(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                  int decoding_speed = 0,
                  nb::handle exif = nb::none(),
                  nb::handle xmp = nb::none(),
-                 nb::handle jumbf = nb::none()) {
+                 nb::handle jumbf = nb::none(),
+                 nb::handle icc = nb::none()) {
   return encode_impl(
-      input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, global_pool());
+      input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc, global_pool());
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -365,6 +377,7 @@ decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
   std::unique_ptr<uint8_t[]> temp_owner;
   uint8_t *result_ptr_var = nullptr;
   std::map<std::string, std::vector<uint8_t>> boxes;
+  std::vector<uint8_t> icc_data;
 
   {
     nb::gil_scoped_release release;
@@ -376,6 +389,10 @@ decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
       throw std::runtime_error("JxlDecoderCreate failed");
     }
 
+    if (JXL_DEC_SUCCESS != JxlDecoderSetCms(dec.get(), *JxlGetDefaultCms())) {
+      throw std::runtime_error("JxlDecoderSetCms failed");
+    }
+
     if (runner != nullptr) {
       if (JXL_DEC_SUCCESS !=
           JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner)) {
@@ -384,7 +401,8 @@ decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int events = JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE | (metadata ? JXL_DEC_BOX : 0);
+    int events =
+        JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE | (metadata ? (JXL_DEC_BOX | JXL_DEC_COLOR_ENCODING) : 0);
     if (metadata) {
       JxlDecoderSetDecompressBoxes(dec.get(), JXL_TRUE);
     }
@@ -408,6 +426,28 @@ decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
       }
       if (status == JXL_DEC_NEED_MORE_INPUT) {
         throw std::runtime_error("Truncated JXL data: need more input for pixels");
+      }
+      if (status == JXL_DEC_COLOR_ENCODING) {
+        JxlColorEncoding color_encoding = {};
+        JxlDecoderStatus enc_status = JxlDecoderGetColorAsEncodedProfile(
+            dec.get(), JXL_COLOR_PROFILE_TARGET_ORIGINAL, &color_encoding);
+        // Only extract ICC profile if the image does not use a structured profile (i.e. has an actual attached ICC profile)
+        if (enc_status != JXL_DEC_SUCCESS) {
+          size_t icc_size = 0;
+          if (JXL_DEC_SUCCESS ==
+                  JxlDecoderGetICCProfileSize(dec.get(), JXL_COLOR_PROFILE_TARGET_ORIGINAL, &icc_size) &&
+              icc_size > 0) {
+            icc_data.resize(icc_size);
+            if (JXL_DEC_SUCCESS !=
+                JxlDecoderGetColorAsICCProfile(dec.get(),
+                                               JXL_COLOR_PROFILE_TARGET_ORIGINAL,
+                                               icc_data.data(),
+                                               icc_data.size())) {
+              icc_data.clear();
+            }
+          }
+        }
+        continue;
       }
       if (status == JXL_DEC_BASIC_INFO) {
         if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(dec.get(), &info)) {
@@ -485,6 +525,11 @@ decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
   }
 
   nb::dict meta;
+  if (!icc_data.empty()) {
+    meta["icc"] = nb::bytes(reinterpret_cast<const char *>(icc_data.data()), icc_data.size());
+    meta["icc_profile"] =
+        nb::bytes(reinterpret_cast<const char *>(icc_data.data()), icc_data.size());
+  }
   for (auto &[key, value] : boxes) {
     if (key == "Exif" && value.size() > 4) {
       meta["exif"] = nb::bytes(reinterpret_cast<const char *>(value.data() + 4), value.size() - 4);
@@ -819,13 +864,14 @@ public:
                          std::optional<int> decoding_speed,
                          nb::handle exif,
                          nb::handle xmp,
-                         nb::handle jumbf) {
+                         nb::handle jumbf,
+                         nb::handle icc) {
     check_closed();
     int eff = effort.value_or(effort_);
     bool ll = lossless.value_or(lossless_);
     float dist = distance.value_or(ll ? 0.0F : distance_);
     int ds = decoding_speed.value_or(decoding_speed_);
-    return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, *pool_);
+    return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, icc, *pool_);
   }
 
   nb::object decode_image(nb::bytes data, bool metadata) {
@@ -917,7 +963,8 @@ NB_MODULE(_pylibjxl, m) { // NOLINT
         "    decoding_speed: Decoding speed tier [0-4], higher = faster to decode (default 0)\n"
         "    exif: Optional EXIF metadata as bytes\n"
         "    xmp: Optional XMP metadata as bytes\n"
-        "    jumbf: Optional JUMBF metadata as bytes\n",
+        "    jumbf: Optional JUMBF metadata as bytes\n"
+        "    icc: Optional ICC profile metadata as bytes\n",
         "input"_a,
         "effort"_a = 7,
         "distance"_a = 1.0F,
@@ -925,16 +972,17 @@ NB_MODULE(_pylibjxl, m) { // NOLINT
         "decoding_speed"_a = 0,
         "exif"_a = nb::none(),
         "xmp"_a = nb::none(),
-        "jumbf"_a = nb::none());
+        "jumbf"_a = nb::none(),
+        "icc"_a = nb::none());
 
   m.def("decode",
         &decode,
         "Decode JXL bytes to a uint8 numpy array (H, W, C).\n\n"
         "When metadata=True, returns a tuple of (array, dict) where dict\n"
-        "contains the extracted metadata (exif, xmp, jumbf as bytes).\n\n"
+        "contains the extracted metadata (exif, xmp, jumbf, icc, icc_profile as bytes).\n\n"
         "Args:\n"
         "    data: bytes object containing JXL-encoded data\n"
-        "    metadata: If True, also extract metadata boxes (default False)\n",
+        "    metadata: If True, also extract metadata boxes and color profiles (default False)\n",
         "data"_a,
         "metadata"_a = false);
 
@@ -969,7 +1017,8 @@ NB_MODULE(_pylibjxl, m) { // NOLINT
            "decoding_speed"_a = nb::none(),
            "exif"_a = nb::none(),
            "xmp"_a = nb::none(),
-           "jumbf"_a = nb::none())
+           "jumbf"_a = nb::none(),
+           "icc"_a = nb::none())
       .def("decode",
            &PyJxlCodec::decode_image,
            "Decode JXL bytes, optionally extracting metadata.",

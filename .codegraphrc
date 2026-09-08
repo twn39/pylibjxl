@@ -1,0 +1,6 @@
+{
+  "include": ["src", "tests"],
+  "exclude": ["dist", "third_party", "build", "htmlcov", "images"],
+  "output": ".codegraph",
+  "cache": true
+}

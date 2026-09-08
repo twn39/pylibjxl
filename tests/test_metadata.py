@@ -29,6 +29,11 @@ XMP_PAYLOAD = (
 # Synthetic JUMBF payload
 JUMBF_PAYLOAD = b"\x00\x00\x00\x1fjumb\x00\x00\x00\x11jumd\x00\x11\x00\x10"
 
+# Standard sRGB ICC profile payload
+from PIL import ImageCms  # noqa: E402
+
+ICC_PAYLOAD = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+
 
 # ─── Free Function: encode / decode roundtrip ───────────────────────────────────
 
@@ -80,6 +85,34 @@ class TestMetadataRoundtrip:
         assert meta["xmp"] == XMP_PAYLOAD
         assert meta["jumbf"] == JUMBF_PAYLOAD
 
+    def test_icc_roundtrip(self, sample_image):
+        img = sample_image
+        data = pylibjxl.encode(img, icc=ICC_PAYLOAD)
+        result, meta = pylibjxl.decode(data, metadata=True)
+        assert result.shape == img.shape
+        assert "icc" in meta
+        assert "icc_profile" in meta
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
+
+    def test_all_four_metadata_types(self, sample_image):
+        img = sample_image
+        data = pylibjxl.encode(
+            img,
+            exif=EXIF_PAYLOAD,
+            xmp=XMP_PAYLOAD,
+            jumbf=JUMBF_PAYLOAD,
+            icc=ICC_PAYLOAD,
+        )
+        result, meta = pylibjxl.decode(data, metadata=True)
+        assert result.shape == img.shape
+        assert len(meta) == 5  # exif, xmp, jumbf, icc, icc_profile
+        assert meta["exif"] == EXIF_PAYLOAD
+        assert meta["xmp"] == XMP_PAYLOAD
+        assert meta["jumbf"] == JUMBF_PAYLOAD
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
+
 
 # ─── Backward Compatibility ─────────────────────────────────────────────────────
 
@@ -123,6 +156,14 @@ class TestContextManagerMetadata:
         assert meta["exif"] == EXIF_PAYLOAD
         assert meta["xmp"] == XMP_PAYLOAD
 
+    def test_context_encode_with_icc(self, sample_image):
+        img = sample_image
+        with pylibjxl.JXL() as jxl:
+            data = jxl.encode(img, icc=ICC_PAYLOAD)
+            result, meta = jxl.decode(data, metadata=True)
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
+
     def test_context_decode_without_metadata(self, sample_image):
         img = sample_image
         with pylibjxl.JXL() as jxl:
@@ -145,6 +186,15 @@ class TestFileIOMetadata:
         assert result.shape == img.shape
         assert meta["exif"] == EXIF_PAYLOAD
 
+    def test_write_read_with_icc(self, tmp_path, sample_image):
+        img = sample_image
+        path = tmp_path / "icc_meta.jxl"
+        pylibjxl.write(path, img, icc=ICC_PAYLOAD)
+        result, meta = pylibjxl.read(path, metadata=True)
+        assert result.shape == img.shape
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
+
     def test_write_read_no_metadata(self, tmp_path, sample_image):
         img = sample_image
         path = tmp_path / "plain.jxl"
@@ -156,9 +206,11 @@ class TestFileIOMetadata:
         img = sample_image
         path = tmp_path / "ctx_meta.jxl"
         with pylibjxl.JXL() as jxl:
-            jxl.write(path, img, xmp=XMP_PAYLOAD)
+            jxl.write(path, img, xmp=XMP_PAYLOAD, icc=ICC_PAYLOAD)
             result, meta = jxl.read(path, metadata=True)
         assert meta["xmp"] == XMP_PAYLOAD
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
 
 
 # ─── Async ──────────────────────────────────────────────────────────────────────
@@ -170,23 +222,31 @@ class TestAsyncMetadata:
     @pytest.mark.asyncio
     async def test_async_encode_decode_metadata(self, sample_image):
         img = sample_image
-        data = await pylibjxl.encode_async(img, exif=EXIF_PAYLOAD)
+        data = await pylibjxl.encode_async(img, exif=EXIF_PAYLOAD, icc=ICC_PAYLOAD)
         result, meta = await pylibjxl.decode_async(data, metadata=True)
         assert meta["exif"] == EXIF_PAYLOAD
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
 
     @pytest.mark.asyncio
     async def test_async_file_roundtrip(self, tmp_path, sample_image):
         img = sample_image
         path = tmp_path / "async_meta.jxl"
-        await pylibjxl.write_async(path, img, exif=EXIF_PAYLOAD, xmp=XMP_PAYLOAD)
+        await pylibjxl.write_async(
+            path, img, exif=EXIF_PAYLOAD, xmp=XMP_PAYLOAD, icc=ICC_PAYLOAD
+        )
         result, meta = await pylibjxl.read_async(path, metadata=True)
         assert meta["exif"] == EXIF_PAYLOAD
         assert meta["xmp"] == XMP_PAYLOAD
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
 
     @pytest.mark.asyncio
     async def test_async_context_metadata(self, sample_image):
         img = sample_image
         async with pylibjxl.AsyncJXL() as jxl:
-            data = await jxl.encode_async(img, xmp=XMP_PAYLOAD)
+            data = await jxl.encode_async(img, xmp=XMP_PAYLOAD, icc=ICC_PAYLOAD)
             result, meta = await jxl.decode_async(data, metadata=True)
         assert meta["xmp"] == XMP_PAYLOAD
+        assert meta["icc"] == ICC_PAYLOAD
+        assert meta["icc_profile"] == ICC_PAYLOAD
