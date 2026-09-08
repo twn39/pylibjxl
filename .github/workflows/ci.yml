@@ -35,8 +35,8 @@ jobs:
       - name: Lint with Ruff
         run: uv run ruff check src tests
 
-      - name: Typecheck with Pyright
-        run: uv run pyright
+      - name: Typecheck with Ty
+        run: uv run ty check src tests
 
   test:
     name: Test (${{ matrix.os }}, py${{ matrix.python-version }})

@@ -6,9 +6,9 @@ import pytest
 from PIL import Image
 
 try:
-    import pillow_jxl  # type: ignore
+    import pillow_jxl
 except ImportError:
-    pillow_jxl = None
+    pillow_jxl = None  # type: ignore[assignment]
 
 import pylibjxl
 

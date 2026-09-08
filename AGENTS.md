@@ -129,7 +129,7 @@ Prefer `asyncio.to_thread` in the Python layer for I/O and CPU-bound tasks that 
 
 ### Code Quality
 - **Linting**: Uses `ruff` (configured in `pyproject.toml`).
-- **Typing**: Uses `pyright` for type checking.
+- **Typing**: Uses `ty` for type checking (`ty check src tests`).
 - **Formatting**: C++ code follows `.clang-format`.
 - **CI**: Build and tests are automated via GitHub Actions (`.github/workflows/build.yml`).
 
