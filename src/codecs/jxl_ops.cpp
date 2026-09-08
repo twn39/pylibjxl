@@ -31,18 +31,20 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                       nb::handle jumbf,
                       nb::handle icc,
                       RunnerPool &pool) {
-  if (input.ndim() != 3) {
-    throw std::invalid_argument("Input must be a 3D array (height, width, channels), got ndim=" +
-                                std::to_string(input.ndim()));
+  if (input.ndim() != 2 && input.ndim() != 3) {
+    throw std::invalid_argument(
+        "Input must be a 2D (height, width) or 3D (height, width, channels) array, got ndim=" +
+        std::to_string(input.ndim()));
   }
 
   const auto height = static_cast<size_t>(input.shape(0));
   const auto width = static_cast<size_t>(input.shape(1));
-  const auto channels = static_cast<size_t>(input.shape(2));
+  const auto channels = input.ndim() == 2 ? 1 : static_cast<size_t>(input.shape(2));
 
-  if (channels != 3 && channels != 4) {
-    throw std::invalid_argument("Input must have 3 (RGB) or 4 (RGBA) channels, got " +
-                                std::to_string(channels));
+  if (channels != 1 && channels != 3 && channels != 4) {
+    throw std::invalid_argument(
+        "Input must have 1 (Grayscale), 3 (RGB), or 4 (RGBA) channels, got " +
+        std::to_string(channels));
   }
 
   // Extract metadata bytes while GIL is held to avoid data races with Python GC
@@ -105,6 +107,7 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
     basic_info.ysize = static_cast<uint32_t>(height);
     basic_info.bits_per_sample = 8;
     basic_info.uses_original_profile = JXL_TRUE;
+    basic_info.num_color_channels = (channels == 1) ? 1 : 3;
     if (channels == 4) {
       basic_info.num_extra_channels = 1;
       basic_info.alpha_bits = 8;
@@ -298,13 +301,18 @@ nb::object decode_impl(nb::handle data,
       if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
         const size_t result_bytes = static_cast<size_t>(info.ysize * info.xsize * channels);
         if (out.has_value()) {
-          if (out->ndim() != 3 || out->shape(0) != info.ysize || out->shape(1) != info.xsize ||
-              out->shape(2) != channels) {
+          bool shape_match = false;
+          if (out->ndim() == 3 && out->shape(0) == info.ysize && out->shape(1) == info.xsize &&
+              out->shape(2) == channels) {
+            shape_match = true;
+          } else if (out->ndim() == 2 && channels == 1 && out->shape(0) == info.ysize &&
+                     out->shape(1) == info.xsize) {
+            shape_match = true;
+          }
+          if (!shape_match) {
             throw std::invalid_argument(
-                "Output buffer shape (" + std::to_string(out->shape(0)) + ", " +
-                std::to_string(out->shape(1)) + ", " + std::to_string(out->shape(2)) +
-                ") does not match image shape (" + std::to_string(info.ysize) + ", " +
-                std::to_string(info.xsize) + ", " + std::to_string(channels) + ")");
+                "Output buffer shape does not match image shape (" + std::to_string(info.ysize) +
+                ", " + std::to_string(info.xsize) + ", " + std::to_string(channels) + ")");
           }
           result_ptr_var = static_cast<uint8_t *>(out->data());
         } else {
@@ -367,12 +375,20 @@ nb::object decode_impl(nb::handle data,
   if (out.has_value()) {
     py_result = nb::cast(*out);
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    size_t shape[3] = {static_cast<size_t>(info.ysize), static_cast<size_t>(info.xsize), channels};
     nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); });
     temp_owner.release();
-    nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> result(result_ptr_var, 3, shape, owner);
-    py_result = nb::cast(result);
+    if (channels == 1) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      size_t shape[2] = {static_cast<size_t>(info.ysize), static_cast<size_t>(info.xsize)};
+      nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> result(result_ptr_var, 2, shape, owner);
+      py_result = nb::cast(result);
+    } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      size_t shape[3] = {
+          static_cast<size_t>(info.ysize), static_cast<size_t>(info.xsize), channels};
+      nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> result(result_ptr_var, 3, shape, owner);
+      py_result = nb::cast(result);
+    }
   }
 
   if (!metadata) {

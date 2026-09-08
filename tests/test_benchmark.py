@@ -125,11 +125,11 @@ def test_benchmark_jxl_to_jpeg_reconstruction(benchmark, sample_jpeg):
 @pytest.mark.parametrize("effort", [1, 4, 7])
 def test_benchmark_jxl_encode_comparison(benchmark, sample_image, effort):
     """Compare pylibjxl vs pillow-jxl-plugin at same effort levels."""
-    
+
     def _pylib():
         return pylibjxl.encode(sample_image, effort=effort)
-    
-    benchmark.extra_info['effort'] = effort
+
+    benchmark.extra_info["effort"] = effort
     benchmark(_pylib)
 
 
@@ -146,7 +146,7 @@ def test_benchmark_pillow_jxl_plugin_encode_comparison(benchmark, sample_image, 
         pil_img.save(buf, format="JXL", effort=effort)
         return buf.getvalue()
 
-    benchmark.extra_info['effort'] = effort
+    benchmark.extra_info["effort"] = effort
     benchmark(_pillow)
 
 

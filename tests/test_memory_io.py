@@ -72,7 +72,9 @@ class TestInPlaceDecoding:
 
     def test_jxl_decode_in_place_shape_mismatch_raises(self, sample_image):
         jxl_data = pylibjxl.encode(sample_image, effort=4)
-        wrong_out = np.zeros((sample_image.shape[0] + 10, sample_image.shape[1], 3), dtype=np.uint8)
+        wrong_out = np.zeros(
+            (sample_image.shape[0] + 10, sample_image.shape[1], 3), dtype=np.uint8
+        )
         with pytest.raises(ValueError, match="does not match"):
             pylibjxl.decode(jxl_data, out=wrong_out)
 
@@ -85,7 +87,9 @@ class TestInPlaceDecoding:
 
     def test_jpeg_decode_in_place_shape_mismatch_raises(self, sample_image):
         jpeg_data = pylibjxl.encode_jpeg(sample_image, quality=90)
-        wrong_out = np.zeros((sample_image.shape[0], sample_image.shape[1] + 10, 3), dtype=np.uint8)
+        wrong_out = np.zeros(
+            (sample_image.shape[0], sample_image.shape[1] + 10, 3), dtype=np.uint8
+        )
         with pytest.raises(ValueError, match="does not match"):
             pylibjxl.decode_jpeg(jpeg_data, out=wrong_out)
 

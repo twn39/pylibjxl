@@ -14,22 +14,24 @@ namespace nb = nanobind;
 namespace pylibjxl {
 
 nb::bytes encode_jpeg(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input, int quality) {
-  if (input.ndim() != 3) {
-    throw std::invalid_argument("Input must be a 3D array (height, width, channels)");
+  if (input.ndim() != 2 && input.ndim() != 3) {
+    throw std::invalid_argument(
+        "Input must be a 2D (height, width) or 3D (height, width, channels) array, got ndim=" +
+        std::to_string(input.ndim()));
   }
   const auto height = static_cast<int>(input.shape(0));
   const auto width = static_cast<int>(input.shape(1));
-  const auto channels = static_cast<int>(input.shape(2));
+  const auto channels = input.ndim() == 2 ? 1 : static_cast<int>(input.shape(2));
 
-  if (channels != 3 && channels != 4) {
-    throw std::invalid_argument("Input must have 3 (RGB) or 4 (RGBA) channels");
+  if (channels != 1 && channels != 3 && channels != 4) {
+    throw std::invalid_argument("Input must have 1 (Grayscale), 3 (RGB), or 4 (RGBA) channels");
   }
 
   quality = std::clamp(quality, 1, 100);
 
   const auto *input_ptr = static_cast<const uint8_t *>(input.data());
-  int pixel_format = (channels == 3) ? TJPF_RGB : TJPF_RGBA;
-  int subsamp = TJSAMP_444;
+  int pixel_format = (channels == 1) ? TJPF_GRAY : (channels == 3 ? TJPF_RGB : TJPF_RGBA);
+  int subsamp = (channels == 1) ? TJSAMP_GRAY : TJSAMP_444;
 
   unsigned char *jpeg_buf = nullptr;
   unsigned long jpeg_size = 0; // NOLINT(google-runtime-int)
@@ -75,6 +77,8 @@ nb::object decode_jpeg(nb::handle data,
 
   std::unique_ptr<uint8_t[]> temp_owner;
   uint8_t *result_ptr_var = nullptr;
+  int out_channels = 3;
+  int pixel_format = TJPF_RGB;
 
   {
     nb::gil_scoped_release release;
@@ -90,17 +94,34 @@ nb::object decode_jpeg(nb::handle data,
     }
 
     if (out.has_value()) {
-      if (out->ndim() != 3 || out->shape(0) != static_cast<size_t>(height) ||
-          out->shape(1) != static_cast<size_t>(width) || out->shape(2) != 3) {
-        throw std::invalid_argument("Output buffer shape (" + std::to_string(out->shape(0)) + ", " +
-                                    std::to_string(out->shape(1)) + ", " +
-                                    std::to_string(out->shape(2)) +
-                                    ") does not match JPEG image shape (" + std::to_string(height) +
-                                    ", " + std::to_string(width) + ", 3)");
+      if (out->ndim() == 2 && out->shape(0) == static_cast<size_t>(height) &&
+          out->shape(1) == static_cast<size_t>(width)) {
+        out_channels = 1;
+        pixel_format = TJPF_GRAY;
+        result_ptr_var = static_cast<uint8_t *>(out->data());
+      } else if (out->ndim() == 3 && out->shape(0) == static_cast<size_t>(height) &&
+                 out->shape(1) == static_cast<size_t>(width) && out->shape(2) == 1) {
+        out_channels = 1;
+        pixel_format = TJPF_GRAY;
+        result_ptr_var = static_cast<uint8_t *>(out->data());
+      } else if (out->ndim() == 3 && out->shape(0) == static_cast<size_t>(height) &&
+                 out->shape(1) == static_cast<size_t>(width) && out->shape(2) == 3) {
+        out_channels = 3;
+        pixel_format = TJPF_RGB;
+        result_ptr_var = static_cast<uint8_t *>(out->data());
+      } else {
+        throw std::invalid_argument("Output buffer shape does not match JPEG dimensions (" +
+                                    std::to_string(height) + ", " + std::to_string(width) + ")");
       }
-      result_ptr_var = static_cast<uint8_t *>(out->data());
     } else {
-      temp_owner.reset(new uint8_t[height * width * 3]);
+      if (subsamp == TJSAMP_GRAY || colorspace == TJCS_GRAY) {
+        out_channels = 1;
+        pixel_format = TJPF_GRAY;
+      } else {
+        out_channels = 3;
+        pixel_format = TJPF_RGB;
+      }
+      temp_owner.reset(new uint8_t[height * width * out_channels]);
       result_ptr_var = temp_owner.get();
     }
 
@@ -111,7 +132,7 @@ nb::object decode_jpeg(nb::handle data,
                       width,
                       0,
                       height,
-                      TJPF_RGB,
+                      pixel_format,
                       TJFLAG_FASTDCT) != 0) {
       throw std::runtime_error(std::string("tjDecompress2 failed: ") +
                                tjGetErrorStr2(decompressor.get()));
@@ -122,13 +143,21 @@ nb::object decode_jpeg(nb::handle data,
     return nb::cast(*out);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  size_t shape[3] = {static_cast<size_t>(height), static_cast<size_t>(width), 3};
   nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); });
   temp_owner.release();
 
-  return nb::cast(
-      nb::ndarray<uint8_t, nb::numpy, nb::device::cpu>(result_ptr_var, 3, shape, owner));
+  if (out_channels == 1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    size_t shape[2] = {static_cast<size_t>(height), static_cast<size_t>(width)};
+    return nb::cast(
+        nb::ndarray<uint8_t, nb::numpy, nb::device::cpu>(result_ptr_var, 2, shape, owner));
+  } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    size_t shape[3] = {
+        static_cast<size_t>(height), static_cast<size_t>(width), static_cast<size_t>(out_channels)};
+    return nb::cast(
+        nb::ndarray<uint8_t, nb::numpy, nb::device::cpu>(result_ptr_var, 3, shape, owner));
+  }
 }
 
 } // namespace pylibjxl

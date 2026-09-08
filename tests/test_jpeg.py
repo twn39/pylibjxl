@@ -27,12 +27,13 @@ def test_encode_rgba(sample_image_rgba):
 
 def test_invalid_input():
     with pytest.raises(TypeError):
-        pylibjxl.encode_jpeg(b"not an array"  # type: ignore
-                             )
+        pylibjxl.encode_jpeg(
+            b"not an array"  # type: ignore
+        )
 
     with pytest.raises(ValueError):
-        # Wrong dimensions
-        pylibjxl.encode_jpeg(np.zeros((10, 10), dtype=np.uint8))
+        # Wrong dimensions (1D array)
+        pylibjxl.encode_jpeg(np.zeros((10,), dtype=np.uint8))
 
     with pytest.raises(ValueError):
         # 5 channels

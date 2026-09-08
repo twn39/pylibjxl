@@ -18,6 +18,7 @@ import pylibjxl
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _gather_encode(n, image, effort=3, use_context=False):
     """Run n concurrent encode operations, return (results, elapsed)."""
     if use_context:
@@ -122,7 +123,9 @@ async def test_encode_scales_with_concurrency(sample_image):
     _, concurrent_time = await _gather_encode(4, sample_image, effort=3)
 
     speedup = serial_time / concurrent_time
-    print(f"\n  Serial: {serial_time:.3f}s | Concurrent(4): {concurrent_time:.3f}s | Speedup: {speedup:.2f}x")
+    print(
+        f"\n  Serial: {serial_time:.3f}s | Concurrent(4): {concurrent_time:.3f}s | Speedup: {speedup:.2f}x"
+    )
     # Should see at least some speedup on multi-core machines
     assert concurrent_time < serial_time * 1.5, (
         f"Concurrent ({concurrent_time:.3f}s) was not faster than serial ({serial_time:.3f}s)"
@@ -142,7 +145,9 @@ async def test_decode_scales_with_concurrency(sample_image):
     _, concurrent_time = await _gather_decode(4, jxl_data)
 
     speedup = serial_time / concurrent_time
-    print(f"\n  Serial: {serial_time:.3f}s | Concurrent(4): {concurrent_time:.3f}s | Speedup: {speedup:.2f}x")
+    print(
+        f"\n  Serial: {serial_time:.3f}s | Concurrent(4): {concurrent_time:.3f}s | Speedup: {speedup:.2f}x"
+    )
     assert concurrent_time < serial_time * 1.5, (
         f"Concurrent ({concurrent_time:.3f}s) was not faster than serial ({serial_time:.3f}s)"
     )
@@ -159,6 +164,7 @@ CONCURRENCY_LEVELS = [1, 2, 4, 8]
 @pytest.mark.parametrize("n", CONCURRENCY_LEVELS)
 def test_benchmark_concurrent_encode_free(benchmark, sample_image, n):
     """Benchmark concurrent encode using free functions."""
+
     async def _run():
         results, _ = await _gather_encode(n, sample_image, effort=3)
         return results
@@ -170,6 +176,7 @@ def test_benchmark_concurrent_encode_free(benchmark, sample_image, n):
 @pytest.mark.parametrize("n", CONCURRENCY_LEVELS)
 def test_benchmark_concurrent_encode_context(benchmark, sample_image, n):
     """Benchmark concurrent encode using AsyncJXL context manager."""
+
     async def _run():
         results, _ = await _gather_encode(n, sample_image, effort=3, use_context=True)
         return results

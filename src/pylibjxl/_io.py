@@ -12,7 +12,7 @@ from ._pylibjxl import (  # type: ignore
 from ._pylibjxl import (  # type: ignore
     encode as _encode,
 )
-from ._pylibjxl import (
+from ._pylibjxl import (  # type: ignore
     encode_jpeg as _encode_jpeg,
 )
 
@@ -117,7 +117,15 @@ def write(
     filepath = Path(path)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     data = encode(
-        image, effort, distance, lossless, decoding_speed, exif=exif, xmp=xmp, jumbf=jumbf, icc=icc
+        image,
+        effort,
+        distance,
+        lossless,
+        decoding_speed,
+        exif=exif,
+        xmp=xmp,
+        jumbf=jumbf,
+        icc=icc,
     )
     filepath.write_bytes(data)
 

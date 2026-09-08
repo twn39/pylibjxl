@@ -217,10 +217,12 @@ class AsyncJXL(_JXL):
         if not filepath.exists():
             raise FileNotFoundError(f"No such file: '{filepath}'")
         if use_mmap:
+
             def _read_mmap():
                 with open(filepath, "rb") as f:
                     with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                         return self.decode(mm, metadata=metadata, out=out)
+
             return await asyncio.to_thread(_read_mmap)
         data = await asyncio.to_thread(filepath.read_bytes)
         return await asyncio.to_thread(self.decode, data, metadata=metadata, out=out)
@@ -276,10 +278,12 @@ class AsyncJXL(_JXL):
         if not filepath.exists():
             raise FileNotFoundError(f"No such file: '{filepath}'")
         if use_mmap:
+
             def _read_mmap():
                 with open(filepath, "rb") as f:
                     with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                         return self.decode_jpeg(mm, out=out)
+
             return await asyncio.to_thread(_read_mmap)
         data = await asyncio.to_thread(filepath.read_bytes)
         return await asyncio.to_thread(self.decode_jpeg, data, out=out)
