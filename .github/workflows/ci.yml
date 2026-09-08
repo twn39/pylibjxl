@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UV_NO_SYNC: "1"
+
 jobs:
   lint:
     name: Lint & Typecheck
@@ -37,6 +40,8 @@ jobs:
 
       - name: Typecheck with Pyright
         run: uv run pyright
+        env:
+          PYTHONPATH: src
 
   test:
     name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
