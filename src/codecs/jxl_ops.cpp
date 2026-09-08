@@ -13,6 +13,7 @@
 #include <jxl/encode.h>
 #include <jxl/resizable_parallel_runner.h>
 
+#include "common/buffer_pool.hpp"
 #include "common/deleters.hpp"
 #include "common/utils.hpp"
 
@@ -63,11 +64,18 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
   const auto *input_ptr = static_cast<const uint8_t *>(input.data());
   const auto input_size = static_cast<size_t>(input.size() * sizeof(uint8_t));
 
-  std::vector<uint8_t> compressed;
+  const uint8_t *output_data = nullptr;
+  size_t output_size = 0;
   {
     nb::gil_scoped_release release;
     RunnerGuard guard(pool, timeout);
     void *runner = guard.get();
+
+    if (runner != nullptr) {
+      size_t suggested = suggest_threads(width, height);
+      size_t target_threads = std::min(pool.threads_per_runner(), suggested);
+      JxlResizableParallelRunnerSetThreads(runner, std::max<size_t>(1, target_threads));
+    }
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
     if (enc == nullptr) {
@@ -170,28 +178,30 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
       JxlEncoderCloseInput(enc.get());
     }
 
+    auto &buf = ThreadLocalBuffer::acquire();
     const size_t estimated = std::max<size_t>(width * height * channels / 2, 4096);
-    compressed.resize(estimated);
-    uint8_t *next_out = compressed.data();
-    size_t avail_out = compressed.size();
+    buf.resize(estimated);
+    uint8_t *next_out = buf.data();
+    size_t avail_out = buf.size();
 
     JxlEncoderStatus status = JXL_ENC_NEED_MORE_OUTPUT;
     while (status == JXL_ENC_NEED_MORE_OUTPUT) {
       status = JxlEncoderProcessOutput(enc.get(), &next_out, &avail_out);
       if (status == JXL_ENC_NEED_MORE_OUTPUT) {
-        const size_t offset = static_cast<size_t>(next_out - compressed.data());
-        compressed.resize(compressed.size() * 2);
-        next_out = compressed.data() + offset;
-        avail_out = compressed.size() - offset;
+        const size_t offset = static_cast<size_t>(next_out - buf.data());
+        buf.resize(buf.size() * 2);
+        next_out = buf.data() + offset;
+        avail_out = buf.size() - offset;
       }
     }
     if (status != JXL_ENC_SUCCESS) {
       throw std::runtime_error("JxlEncoderProcessOutput failed");
     }
-    compressed.resize(static_cast<size_t>(next_out - compressed.data()));
+    output_size = static_cast<size_t>(next_out - buf.data());
+    output_data = buf.data();
   }
 
-  return nb::bytes(reinterpret_cast<const char *>(compressed.data()), compressed.size());
+  return nb::bytes(reinterpret_cast<const char *>(output_data), output_size);
 }
 
 nb::bytes encode(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
@@ -296,6 +306,11 @@ nb::object decode_impl(nb::handle data,
       if (status == JXL_DEC_BASIC_INFO) {
         if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(dec.get(), &info)) {
           throw std::runtime_error("JxlDecoderGetBasicInfo failed");
+        }
+        if (runner != nullptr) {
+          size_t suggested = suggest_threads(info.xsize, info.ysize);
+          size_t target_threads = std::min(pool.threads_per_runner(), suggested);
+          JxlResizableParallelRunnerSetThreads(runner, std::max<size_t>(1, target_threads));
         }
         channels = info.num_color_channels + (info.alpha_bits > 0 ? 1 : 0);
         format = {static_cast<uint32_t>(channels), JXL_TYPE_UINT8, JXL_LITTLE_ENDIAN, 0};
@@ -423,4 +438,66 @@ nb::object decode(nb::handle data,
   return decode_impl(data, metadata, out, global_pool(), timeout);
 }
 
+nb::dict probe(nb::handle data) {
+  ScopedPyBuffer py_buf(data);
+  const auto *jxl_data = py_buf.data();
+  const auto jxl_size = py_buf.size();
+
+  JxlBasicInfo info{};
+  bool basic_info_read = false;
+
+  {
+    nb::gil_scoped_release release;
+    JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
+    if (dec == nullptr) {
+      throw std::runtime_error("JxlDecoderCreate failed");
+    }
+
+    if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_BASIC_INFO)) {
+      throw std::runtime_error("JxlDecoderSubscribeEvents failed");
+    }
+
+    JxlDecoderSetInput(dec.get(), jxl_data, jxl_size);
+    JxlDecoderCloseInput(dec.get());
+
+    for (;;) {
+      JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
+      if (status == JXL_DEC_ERROR) {
+        throw std::runtime_error("Decoder error during basic info probe");
+      }
+      if (status == JXL_DEC_NEED_MORE_INPUT) {
+        throw std::runtime_error("Truncated JXL data: need more input for header");
+      }
+      if (status == JXL_DEC_BASIC_INFO) {
+        if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(dec.get(), &info)) {
+          throw std::runtime_error("JxlDecoderGetBasicInfo failed");
+        }
+        basic_info_read = true;
+        break;
+      }
+      if (status == JXL_DEC_SUCCESS) {
+        break;
+      }
+    }
+  }
+
+  if (!basic_info_read) {
+    throw std::runtime_error("Failed to read JXL basic info header");
+  }
+
+  nb::dict d;
+  d["width"] = info.xsize;
+  d["height"] = info.ysize;
+  size_t channels = info.num_color_channels + (info.alpha_bits > 0 ? 1 : 0);
+  d["channels"] = channels;
+  d["color_channels"] = info.num_color_channels;
+  d["has_alpha"] = (info.alpha_bits > 0);
+  d["bits_per_sample"] = info.bits_per_sample;
+  d["exponent_bits_per_sample"] = info.exponent_bits_per_sample;
+  d["have_animation"] = (info.have_animation == JXL_TRUE);
+  d["suggested_threads"] = suggest_threads(info.xsize, info.ysize);
+  return d;
+}
+
 } // namespace pylibjxl
+

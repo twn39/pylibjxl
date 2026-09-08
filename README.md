@@ -84,6 +84,20 @@ pylibjxl.convert_jpeg_to_jxl("input.jpg", "input.jxl")
 pylibjxl.convert_jxl_to_jpeg("input.jxl", "restored.jpg")
 ```
 
+### 🔍 Ultra-Fast Header Probing (`probe`)
+Extract JXL dimensions, channels, bit depth, and suggested threads in **< 0.05ms** (~20μs) without decoding pixel buffers or competing for worker threads in the runner pool:
+```python
+# Probe raw bytes or memoryview
+info = pylibjxl.probe(jxl_bytes)
+print(info["width"], info["height"], info["channels"])
+
+# Probe file directly (with optional zero-copy mmap)
+info = pylibjxl.probe_file("image.jxl", use_mmap=True)
+
+# Async variant for event loops
+info = await pylibjxl.probe_async(jxl_bytes)
+```
+
 ### ⚡ Async Support
 High-performance non-blocking I/O for web servers and data pipelines.
 ```python

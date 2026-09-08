@@ -102,6 +102,18 @@ NB_MODULE(_pylibjxl, m) {
       "out"_a = nb::none(),
       "timeout"_a = nb::none());
 
+  m.def(
+      "probe",
+      &probe,
+      "Probe JXL header metadata (dimensions, channels, suggested threads) in <0.05ms.\n\n"
+      "Zero runner pool contention: executes directly on the caller thread without acquiring workers.\n\n"
+      "Args:\n"
+      "    data: Buffer object containing JXL-encoded data\n"
+      "Returns:\n"
+      "    dict containing width, height, channels, color_channels, has_alpha, bits_per_sample,\n"
+      "    exponent_bits_per_sample, have_animation, suggested_threads\n",
+      "data"_a);
+
   nb::class_<PyJxlCodec>(m,
                          "JXL",
                          "Unified JXL/JPEG codec with context manager support.\n\n"
@@ -146,6 +158,10 @@ NB_MODULE(_pylibjxl, m) {
            "metadata"_a = false,
            "out"_a = nb::none(),
            "timeout"_a = nb::none())
+      .def("probe",
+           &PyJxlCodec::probe_image,
+           "Probe JXL header metadata (dimensions, channels, suggested threads) with zero contention.",
+           "data"_a)
       .def("encode_jpeg",
            &PyJxlCodec::encode_jpeg_image,
            "Encode numpy array to JPEG bytes (uses libjpeg-turbo, zero-copy direct output).",

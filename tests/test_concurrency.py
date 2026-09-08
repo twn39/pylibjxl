@@ -300,4 +300,3 @@ async def test_async_context_default_timeout(sample_image):
         with pytest.raises(pylibjxl.CodecTimeoutError):
             await jxl.encode_async(big_image, effort=1)
         await task1
-

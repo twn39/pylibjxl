@@ -78,6 +78,11 @@ public:
     return decode_impl(data, metadata, out, *pool_, resolve_timeout(timeout));
   }
 
+  nb::dict probe_image(nb::handle data) {
+    check_closed();
+    return probe(data);
+  }
+
   nb::bytes encode_jpeg_image(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                               int quality) {
     check_closed();

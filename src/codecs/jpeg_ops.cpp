@@ -39,7 +39,7 @@ nb::bytes encode_jpeg(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
   {
     nb::gil_scoped_release release;
 
-    TjPtr compressor(tjInitCompress());
+    thread_local TjPtr compressor(tjInitCompress());
     if (compressor == nullptr) {
       throw std::runtime_error("tjInitCompress failed");
     }
@@ -82,7 +82,7 @@ nb::object decode_jpeg(nb::handle data,
 
   {
     nb::gil_scoped_release release;
-    TjPtr decompressor(tjInitDecompress());
+    thread_local TjPtr decompressor(tjInitDecompress());
     if (decompressor == nullptr) {
       throw std::runtime_error("tjInitDecompress failed");
     }

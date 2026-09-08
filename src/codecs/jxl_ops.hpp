@@ -49,4 +49,6 @@ decode(nanobind::handle data,
            std::nullopt,
        std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
+nanobind::dict probe(nanobind::handle data);
+
 } // namespace pylibjxl

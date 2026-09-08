@@ -5,6 +5,8 @@ import numpy as np
 from ._io import (
     convert_jpeg_to_jxl,
     convert_jxl_to_jpeg,
+    probe,
+    probe_file,
     read,
     read_jpeg,
     write,
@@ -66,7 +68,9 @@ async def decode_async(data, *, metadata=False, out=None, timeout=None):
     When metadata=True, returns (array, dict) with extracted metadata.
     When out is provided, decodes in-place into the pre-allocated array.
     """
-    return await asyncio.to_thread(decode, data, metadata=metadata, out=out, timeout=timeout)
+    return await asyncio.to_thread(
+        decode, data, metadata=metadata, out=out, timeout=timeout
+    )
 
 
 async def read_async(path, *, metadata=False, out=None, use_mmap=False, timeout=None):
@@ -74,6 +78,16 @@ async def read_async(path, *, metadata=False, out=None, use_mmap=False, timeout=
     return await asyncio.to_thread(
         read, path, metadata=metadata, out=out, use_mmap=use_mmap, timeout=timeout
     )
+
+
+async def probe_async(data):
+    """Asynchronously probe JXL header metadata with zero pool contention."""
+    return await asyncio.to_thread(probe, data)
+
+
+async def probe_file_async(path, *, use_mmap=False):
+    """Asynchronously probe JXL image file header metadata without decoding pixels."""
+    return await asyncio.to_thread(probe_file, path, use_mmap=use_mmap)
 
 
 async def write_async(
@@ -169,4 +183,3 @@ async def convert_jxl_to_jpeg_async(jxl_path, jpeg_path, *, timeout=None):
     return await asyncio.to_thread(
         convert_jxl_to_jpeg, jxl_path, jpeg_path, timeout=timeout
     )
-

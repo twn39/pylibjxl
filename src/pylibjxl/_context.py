@@ -115,6 +115,21 @@ class JXL(_JXL):
         data = filepath.read_bytes()
         return self.decode(data, metadata=metadata, out=out, timeout=timeout)
 
+    def probe(self, data):
+        """Probe JXL header metadata with zero pool contention."""
+        return super().probe(data)
+
+    def probe_file(self, path, *, use_mmap=False):
+        """Probe JXL file header metadata without decoding pixels."""
+        filepath = Path(path)
+        if not filepath.exists():
+            raise FileNotFoundError(f"No such file: '{filepath}'")
+        if use_mmap:
+            with open(filepath, "rb") as f:
+                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    return self.probe(mm)
+        return self.probe(filepath.read_bytes())
+
     def write(
         self,
         path,
@@ -338,6 +353,14 @@ class AsyncJXL(JXL):
             timeout=timeout,
         )
 
+    async def probe_async(self, data):
+        """Asynchronously probe JXL header metadata with zero contention."""
+        return await asyncio.to_thread(self.probe, data)
+
+    async def probe_file_async(self, path, *, use_mmap=False):
+        """Asynchronously probe JXL file header metadata without decoding pixels."""
+        return await asyncio.to_thread(self.probe_file, path, use_mmap=use_mmap)
+
     async def write_async(
         self,
         path,
@@ -394,9 +417,7 @@ class AsyncJXL(JXL):
 
     async def read_jpeg_async(self, path, *, out=None, use_mmap=False):
         """Asynchronously read a JPEG file."""
-        return await self._run_guarded(
-            self.read_jpeg, path, out=out, use_mmap=use_mmap
-        )
+        return await self._run_guarded(self.read_jpeg, path, out=out, use_mmap=use_mmap)
 
     async def write_jpeg_async(self, path, image, quality=95):
         """Asynchronously write a JPEG file."""
@@ -436,4 +457,3 @@ class AsyncJXL(JXL):
         return await self._run_guarded(
             self.convert_jxl_to_jpeg, jxl_path, jpeg_path, timeout=timeout
         )
-

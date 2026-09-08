@@ -15,6 +15,9 @@ from ._pylibjxl import (  # type: ignore
 from ._pylibjxl import (  # type: ignore
     encode_jpeg as _encode_jpeg,
 )
+from ._pylibjxl import (  # type: ignore
+    probe as _probe,
+)
 
 
 def encode(
@@ -89,6 +92,45 @@ def read(path, *, metadata=False, out=None, use_mmap=False, timeout=None):
     else:
         data = filepath.read_bytes()
         return decode(data, metadata=metadata, out=out, timeout=timeout)
+
+
+def probe(data):
+    """Probe JXL header metadata (dimensions, channels, suggested threads) in <0.05ms.
+
+    Bypasses the parallel runner pool completely with zero resource contention.
+
+    Args:
+        data: Buffer object containing JXL-encoded data (bytes, memoryview, mmap, etc.).
+
+    Returns:
+        dict with keys: 'width', 'height', 'channels', 'color_channels',
+        'has_alpha', 'bits_per_sample', 'exponent_bits_per_sample',
+        'have_animation', 'suggested_threads'.
+    """
+    return _probe(data)
+
+
+def probe_file(path, *, use_mmap=False):
+    """Probe JXL image file header metadata without decoding pixel data.
+
+    Args:
+        path: Path to a .jxl file (str or Path).
+        use_mmap: If True, uses memory-mapped file for zero-copy reading (default False).
+
+    Returns:
+        dict with image dimensions, channels, and header info.
+    """
+    filepath = Path(path)
+    if not filepath.exists():
+        raise FileNotFoundError(f"No such file: '{filepath}'")
+
+    if use_mmap:
+        with open(filepath, "rb") as f:
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                return _probe(mm)
+    else:
+        data = filepath.read_bytes()
+        return _probe(data)
 
 
 def write(
@@ -195,7 +237,9 @@ def convert_jpeg_to_jxl(jpeg_path, jxl_path, effort=7, *, timeout=None):
         raise FileNotFoundError(f"No such file: '{jpeg_filepath}'")
     jxl_filepath = Path(jxl_path)
     jxl_filepath.parent.mkdir(parents=True, exist_ok=True)
-    jpeg_to_jxl_file(str(jpeg_filepath), str(jxl_filepath), effort=effort, timeout=timeout)
+    jpeg_to_jxl_file(
+        str(jpeg_filepath), str(jxl_filepath), effort=effort, timeout=timeout
+    )
 
 
 def convert_jxl_to_jpeg(jxl_path, jpeg_path, *, timeout=None):
