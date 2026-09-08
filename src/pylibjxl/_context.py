@@ -4,21 +4,20 @@ from pathlib import Path
 
 import numpy as np
 
-from ._pylibjxl import (  # type: ignore
-    JXL as _JXL,
-)
+from ._pylibjxl import JXL as _JXL  # type: ignore
+from ._pylibjxl import CodecTimeoutError  # type: ignore
 
 
 class JXL(_JXL):
     """Unified JXL/JPEG codec with synchronous context manager support.
 
-    Owns a shared thread pool that is destroyed on close()/exit.
+    Owns an elastic thread pool that is destroyed on close()/exit.
     Supports JXL encode/decode, JPEG encode/decode, cross-format
     transcoding, and file I/O for both formats.
 
     Usage::
 
-        with pylibjxl.JXL(effort=7, threads=4) as jxl:
+        with pylibjxl.JXL(effort=7, pool_size=4, timeout=5.0) as jxl:
             # JXL
             jxl.write("output.jxl", image, exif=exif_bytes)
             img, meta = jxl.read("output.jxl", metadata=True)
@@ -37,10 +36,33 @@ class JXL(_JXL):
         distance: Perceptual distance [0.0-25.0] (default 1.0).
         lossless: If True, encode losslessly (default False).
         decoding_speed: Decoding speed tier [0-4] (default 0).
-        threads: Number of worker threads to use (default 0 = auto-detect).
-                 For asyncio/FastAPI, set this to a fixed value (e.g., 4-8)
-                 to prevent thread explosion.
+        threads: Number of worker threads per runner (default 0 = auto-detect).
+        pool_size: Maximum concurrent operations (default 0 = auto-balance).
+        timeout: Acquisition timeout in seconds (default None = wait indefinitely).
+        idle_timeout: Idle runner reap timeout in seconds (default 30.0).
     """
+
+    def __init__(
+        self,
+        effort=7,
+        distance=1.0,
+        lossless=False,
+        decoding_speed=0,
+        threads=0,
+        pool_size=0,
+        timeout=None,
+        idle_timeout=30.0,
+    ):
+        super().__init__(
+            effort=effort,
+            distance=distance,
+            lossless=lossless,
+            decoding_speed=decoding_speed,
+            threads=threads,
+            pool_size=pool_size,
+            timeout=timeout,
+            idle_timeout=idle_timeout,
+        )
 
     def encode(
         self,
@@ -53,12 +75,26 @@ class JXL(_JXL):
         xmp=None,
         jumbf=None,
         icc=None,
+        *,
+        timeout=None,
     ):
         if hasattr(input, "flags") and not input.flags.c_contiguous:
             input = np.ascontiguousarray(input)
         return super().encode(
-            input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc
+            input,
+            effort,
+            distance,
+            lossless,
+            decoding_speed,
+            exif,
+            xmp,
+            jumbf,
+            icc,
+            timeout=timeout,
         )
+
+    def decode(self, data, *, metadata=False, out=None, timeout=None):
+        return super().decode(data, metadata=metadata, out=out, timeout=timeout)
 
     def encode_jpeg(self, input, quality=95):
         if hasattr(input, "flags") and not input.flags.c_contiguous:
@@ -67,7 +103,7 @@ class JXL(_JXL):
 
     # ── JXL File I/O ──
 
-    def read(self, path, *, metadata=False, out=None, use_mmap=False):
+    def read(self, path, *, metadata=False, out=None, use_mmap=False, timeout=None):
         """Read a JXL file and return a numpy array."""
         filepath = Path(path)
         if not filepath.exists():
@@ -75,9 +111,9 @@ class JXL(_JXL):
         if use_mmap:
             with open(filepath, "rb") as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    return self.decode(mm, metadata=metadata, out=out)
+                    return self.decode(mm, metadata=metadata, out=out, timeout=timeout)
         data = filepath.read_bytes()
-        return self.decode(data, metadata=metadata, out=out)
+        return self.decode(data, metadata=metadata, out=out, timeout=timeout)
 
     def write(
         self,
@@ -92,6 +128,7 @@ class JXL(_JXL):
         xmp=None,
         jumbf=None,
         icc=None,
+        timeout=None,
     ):
         """Encode a numpy array and write it to a JXL file."""
         if hasattr(image, "flags") and not image.flags.c_contiguous:
@@ -99,7 +136,16 @@ class JXL(_JXL):
         filepath = Path(path)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         data = self.encode(
-            image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc
+            image,
+            effort,
+            distance,
+            lossless,
+            decoding_speed,
+            exif,
+            xmp,
+            jumbf,
+            icc,
+            timeout=timeout,
         )
         filepath.write_bytes(data)
 
@@ -128,33 +174,35 @@ class JXL(_JXL):
 
     # ── Cross-Format File Conversion ──
 
-    def convert_jpeg_to_jxl(self, jpeg_path, jxl_path, effort=None):
+    def convert_jpeg_to_jxl(self, jpeg_path, jxl_path, effort=None, *, timeout=None):
         """Convert a JPEG file to JXL file (lossless transcoding)."""
         jpeg_filepath = Path(jpeg_path)
         if not jpeg_filepath.exists():
             raise FileNotFoundError(f"No such file: '{jpeg_filepath}'")
         jxl_filepath = Path(jxl_path)
         jxl_filepath.parent.mkdir(parents=True, exist_ok=True)
-        self.jpeg_to_jxl_file(str(jpeg_filepath), str(jxl_filepath), effort=effort)
+        self.jpeg_to_jxl_file(
+            str(jpeg_filepath), str(jxl_filepath), effort=effort, timeout=timeout
+        )
 
-    def convert_jxl_to_jpeg(self, jxl_path, jpeg_path):
+    def convert_jxl_to_jpeg(self, jxl_path, jpeg_path, *, timeout=None):
         """Convert a JXL file to JPEG file (lossless reconstruction)."""
         jxl_filepath = Path(jxl_path)
         if not jxl_filepath.exists():
             raise FileNotFoundError(f"No such file: '{jxl_filepath}'")
         jpeg_filepath = Path(jpeg_path)
         jpeg_filepath.parent.mkdir(parents=True, exist_ok=True)
-        self.jxl_to_jpeg_file(str(jxl_filepath), str(jpeg_filepath))
+        self.jxl_to_jpeg_file(str(jxl_filepath), str(jpeg_filepath), timeout=timeout)
 
 
-class AsyncJXL(_JXL):
+class AsyncJXL(JXL):
     """Unified JXL/JPEG codec with async context manager support.
 
-    Owns a shared thread pool that is destroyed on close()/exit.
+    Owns an elastic thread pool with asyncio.Semaphore backpressure.
 
     Usage::
 
-        async with pylibjxl.AsyncJXL(effort=7, threads=4) as jxl:
+        async with pylibjxl.AsyncJXL(effort=7, pool_size=4, timeout=5.0) as jxl:
             await jxl.write_async("output.jxl", image)
             await jxl.write_jpeg_async("output.jpg", image)
             await jxl.convert_jpeg_to_jxl_async("in.jpg", "out.jxl")
@@ -164,10 +212,37 @@ class AsyncJXL(_JXL):
         distance: Perceptual distance [0.0-25.0] (default 1.0).
         lossless: If True, encode losslessly (default False).
         decoding_speed: Decoding speed tier [0-4] (default 0).
-        threads: Number of worker threads to use (default 0 = auto-detect).
-                 For asyncio/FastAPI, set this to a fixed value (e.g., 4-8)
-                 to prevent thread explosion.
+        threads: Number of worker threads per runner (default 0 = auto-detect).
+        pool_size: Maximum concurrent operations (default 0 = auto-balance).
+        timeout: Acquisition timeout in seconds (default None = wait indefinitely).
+        idle_timeout: Idle runner reap timeout in seconds (default 30.0).
     """
+
+    def __init__(
+        self,
+        effort=7,
+        distance=1.0,
+        lossless=False,
+        decoding_speed=0,
+        threads=0,
+        pool_size=0,
+        timeout=None,
+        idle_timeout=30.0,
+    ):
+        super().__init__(
+            effort=effort,
+            distance=distance,
+            lossless=lossless,
+            decoding_speed=decoding_speed,
+            threads=threads,
+            pool_size=pool_size,
+            timeout=timeout,
+            idle_timeout=idle_timeout,
+        )
+        self._default_timeout = timeout
+        self._semaphore = (
+            asyncio.Semaphore(self.pool_size) if self.pool_size > 0 else None
+        )
 
     async def __aenter__(self):
         self.__enter__()
@@ -175,6 +250,37 @@ class AsyncJXL(_JXL):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self.__exit__(exc_type, exc_val, exc_tb)
+
+    async def _run_guarded(self, func, *args, **kwargs):
+        timeout = kwargs.get("timeout")
+        if (
+            timeout is None
+            and self._default_timeout is not None
+            and self._default_timeout > 0
+        ):
+            timeout = self._default_timeout
+
+        if self._semaphore is not None:
+            if timeout is not None and timeout > 0:
+                t0 = asyncio.get_running_loop().time()
+                try:
+                    await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    raise CodecTimeoutError(
+                        f"RunnerPool acquisition timed out after {int(timeout * 1000)}ms"
+                    ) from None
+                try:
+                    elapsed = asyncio.get_running_loop().time() - t0
+                    remaining = max(0.001, timeout - elapsed)
+                    if "timeout" in kwargs:
+                        kwargs["timeout"] = remaining
+                    return await asyncio.to_thread(func, *args, **kwargs)
+                finally:
+                    self._semaphore.release()
+            else:
+                async with self._semaphore:
+                    return await asyncio.to_thread(func, *args, **kwargs)
+        return await asyncio.to_thread(func, *args, **kwargs)
 
     # ── JXL async ──
 
@@ -190,42 +296,47 @@ class AsyncJXL(_JXL):
         xmp=None,
         jumbf=None,
         icc=None,
+        timeout=None,
     ):
         """Asynchronously encode a numpy array to JXL bytes."""
-        if hasattr(input, "flags") and not input.flags.c_contiguous:
-            input = np.ascontiguousarray(input)
-        return await asyncio.to_thread(
-            self.encode,
-            input,
-            effort,
-            distance,
-            lossless,
-            decoding_speed,
-            exif,
-            xmp,
-            jumbf,
-            icc,
+
+        def _worker(timeout=None):
+            nonlocal input
+            if hasattr(input, "flags") and not input.flags.c_contiguous:
+                input = np.ascontiguousarray(input)
+            return self.encode(
+                input,
+                effort=effort,
+                distance=distance,
+                lossless=lossless,
+                decoding_speed=decoding_speed,
+                exif=exif,
+                xmp=xmp,
+                jumbf=jumbf,
+                icc=icc,
+                timeout=timeout,
+            )
+
+        return await self._run_guarded(_worker, timeout=timeout)
+
+    async def decode_async(self, data, *, metadata=False, out=None, timeout=None):
+        """Asynchronously decode JXL bytes to a numpy array."""
+        return await self._run_guarded(
+            self.decode, data, metadata=metadata, out=out, timeout=timeout
         )
 
-    async def decode_async(self, data, *, metadata=False, out=None):
-        """Asynchronously decode JXL bytes to a numpy array."""
-        return await asyncio.to_thread(self.decode, data, metadata=metadata, out=out)
-
-    async def read_async(self, path, *, metadata=False, out=None, use_mmap=False):
+    async def read_async(
+        self, path, *, metadata=False, out=None, use_mmap=False, timeout=None
+    ):
         """Asynchronously read a JXL file and return a numpy array."""
-        filepath = Path(path)
-        if not filepath.exists():
-            raise FileNotFoundError(f"No such file: '{filepath}'")
-        if use_mmap:
-
-            def _read_mmap():
-                with open(filepath, "rb") as f:
-                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                        return self.decode(mm, metadata=metadata, out=out)
-
-            return await asyncio.to_thread(_read_mmap)
-        data = await asyncio.to_thread(filepath.read_bytes)
-        return await asyncio.to_thread(self.decode, data, metadata=metadata, out=out)
+        return await self._run_guarded(
+            self.read,
+            path,
+            metadata=metadata,
+            out=out,
+            use_mmap=use_mmap,
+            timeout=timeout,
+        )
 
     async def write_async(
         self,
@@ -240,91 +351,89 @@ class AsyncJXL(_JXL):
         xmp=None,
         jumbf=None,
         icc=None,
+        timeout=None,
     ):
         """Asynchronously encode and write to a JXL file."""
-        if hasattr(image, "flags") and not image.flags.c_contiguous:
-            image = np.ascontiguousarray(image)
-        data = await asyncio.to_thread(
-            self.encode,
-            image,
-            effort,
-            distance,
-            lossless,
-            decoding_speed,
-            exif,
-            xmp,
-            jumbf,
-            icc,
-        )
-        filepath = Path(path)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(filepath.write_bytes, data)
+
+        def _worker(timeout=None):
+            nonlocal image
+            if hasattr(image, "flags") and not image.flags.c_contiguous:
+                image = np.ascontiguousarray(image)
+            self.write(
+                path,
+                image,
+                effort=effort,
+                distance=distance,
+                lossless=lossless,
+                decoding_speed=decoding_speed,
+                exif=exif,
+                xmp=xmp,
+                jumbf=jumbf,
+                icc=icc,
+                timeout=timeout,
+            )
+
+        return await self._run_guarded(_worker, timeout=timeout)
 
     # ── JPEG async ──
 
     async def encode_jpeg_async(self, input, quality=95):
         """Asynchronously encode numpy array to JPEG bytes."""
-        if hasattr(input, "flags") and not input.flags.c_contiguous:
-            input = np.ascontiguousarray(input)
-        return await asyncio.to_thread(self.encode_jpeg, input, quality)
+
+        def _worker():
+            nonlocal input
+            if hasattr(input, "flags") and not input.flags.c_contiguous:
+                input = np.ascontiguousarray(input)
+            return self.encode_jpeg(input, quality=quality)
+
+        return await self._run_guarded(_worker)
 
     async def decode_jpeg_async(self, data, *, out=None):
         """Asynchronously decode JPEG bytes to numpy array."""
-        return await asyncio.to_thread(self.decode_jpeg, data, out=out)
+        return await self._run_guarded(self.decode_jpeg, data, out=out)
 
     async def read_jpeg_async(self, path, *, out=None, use_mmap=False):
         """Asynchronously read a JPEG file."""
-        filepath = Path(path)
-        if not filepath.exists():
-            raise FileNotFoundError(f"No such file: '{filepath}'")
-        if use_mmap:
-
-            def _read_mmap():
-                with open(filepath, "rb") as f:
-                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                        return self.decode_jpeg(mm, out=out)
-
-            return await asyncio.to_thread(_read_mmap)
-        data = await asyncio.to_thread(filepath.read_bytes)
-        return await asyncio.to_thread(self.decode_jpeg, data, out=out)
+        return await self._run_guarded(
+            self.read_jpeg, path, out=out, use_mmap=use_mmap
+        )
 
     async def write_jpeg_async(self, path, image, quality=95):
         """Asynchronously write a JPEG file."""
-        if hasattr(image, "flags") and not image.flags.c_contiguous:
-            image = np.ascontiguousarray(image)
-        data = await asyncio.to_thread(self.encode_jpeg, image, quality)
-        filepath = Path(path)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(filepath.write_bytes, data)
+
+        def _worker():
+            nonlocal image
+            if hasattr(image, "flags") and not image.flags.c_contiguous:
+                image = np.ascontiguousarray(image)
+            self.write_jpeg(path, image, quality)
+
+        return await self._run_guarded(_worker)
 
     # ── Cross-format async ──
 
-    async def jpeg_to_jxl_async(self, data, effort=None):
+    async def jpeg_to_jxl_async(self, data, effort=None, *, timeout=None):
         """Asynchronously transcode JPEG bytes to JXL bytes."""
-        return await asyncio.to_thread(self.jpeg_to_jxl, data, effort)
+        return await self._run_guarded(self.jpeg_to_jxl, data, effort, timeout=timeout)
 
-    async def jxl_to_jpeg_async(self, data):
+    async def jxl_to_jpeg_async(self, data, *, timeout=None):
         """Asynchronously reconstruct JPEG bytes from JXL bytes."""
-        return await asyncio.to_thread(self.jxl_to_jpeg, data)
+        return await self._run_guarded(self.jxl_to_jpeg, data, timeout=timeout)
 
-    async def convert_jpeg_to_jxl_async(self, jpeg_path, jxl_path, effort=None):
+    async def convert_jpeg_to_jxl_async(
+        self, jpeg_path, jxl_path, effort=None, *, timeout=None
+    ):
         """Asynchronously convert a JPEG file to JXL file."""
-        jpeg_filepath = Path(jpeg_path)
-        if not jpeg_filepath.exists():
-            raise FileNotFoundError(f"No such file: '{jpeg_filepath}'")
-        jxl_filepath = Path(jxl_path)
-        jxl_filepath.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(
-            self.jpeg_to_jxl_file, str(jpeg_filepath), str(jxl_filepath), effort
+        return await self._run_guarded(
+            self.convert_jpeg_to_jxl,
+            jpeg_path,
+            jxl_path,
+            effort=effort,
+            timeout=timeout,
         )
 
-    async def convert_jxl_to_jpeg_async(self, jxl_path, jpeg_path):
+    async def convert_jxl_to_jpeg_async(self, jxl_path, jpeg_path, *, timeout=None):
         """Asynchronously convert a JXL file to JPEG file."""
-        jxl_filepath = Path(jxl_path)
-        if not jxl_filepath.exists():
-            raise FileNotFoundError(f"No such file: '{jxl_filepath}'")
-        jpeg_filepath = Path(jpeg_path)
-        jpeg_filepath.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(
-            self.jxl_to_jpeg_file, str(jxl_filepath), str(jpeg_filepath)
+        return await self._run_guarded(
+            self.convert_jxl_to_jpeg, jxl_path, jpeg_path, timeout=timeout
         )
+

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -20,7 +21,8 @@ encode_impl(nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu
             nanobind::handle xmp,
             nanobind::handle jumbf,
             nanobind::handle icc,
-            RunnerPool &pool);
+            RunnerPool &pool,
+            std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
 nanobind::bytes encode(nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu> input,
                        int effort = 7,
@@ -30,18 +32,21 @@ nanobind::bytes encode(nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::
                        nanobind::handle exif = nanobind::none(),
                        nanobind::handle xmp = nanobind::none(),
                        nanobind::handle jumbf = nanobind::none(),
-                       nanobind::handle icc = nanobind::none());
+                       nanobind::handle icc = nanobind::none(),
+                       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
 nanobind::object decode_impl(
     nanobind::handle data,
     bool metadata,
     std::optional<nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu>> out,
-    RunnerPool &pool);
+    RunnerPool &pool,
+    std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
 nanobind::object
 decode(nanobind::handle data,
        bool metadata = false,
        std::optional<nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu>> out =
-           std::nullopt);
+           std::nullopt,
+       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
 } // namespace pylibjxl

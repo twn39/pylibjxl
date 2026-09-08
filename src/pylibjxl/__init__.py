@@ -29,6 +29,7 @@ from ._io import (
     write_jpeg,
 )
 from ._pylibjxl import (  # type: ignore
+    CodecTimeoutError,
     decode,
     decode_jpeg,
     decoder_version,
@@ -41,6 +42,7 @@ from ._pylibjxl import (  # type: ignore
 )
 
 __all__ = [
+    "CodecTimeoutError",
     "version",
     "decoder_version",
     "encoder_version",

@@ -196,3 +196,108 @@ def test_benchmark_concurrent_decode(benchmark, sample_image, n):
 
     results = benchmark(lambda: asyncio.run(_run()))
     assert len(results) == n
+
+
+# ---------------------------------------------------------------------------
+# Concurrency, Pool Elasticity, and Timeout Tests
+# ---------------------------------------------------------------------------
+
+
+def test_codec_timeout_error_hierarchy():
+    """CodecTimeoutError is a subclass of Python's built-in TimeoutError."""
+    assert issubclass(pylibjxl.CodecTimeoutError, TimeoutError)
+    assert issubclass(pylibjxl.CodecTimeoutError, Exception)
+
+
+def test_pool_telemetry_and_elasticity(sample_image):
+    """Verify dynamic on-demand expansion and runner pool telemetry."""
+    import threading
+
+    big_image = np.tile(sample_image, (2, 2, 1))
+    with pylibjxl.JXL(pool_size=4, threads=1) as jxl:
+        assert jxl.pool_size == 4
+        assert jxl.threads_per_runner == 1
+        # 1 eager warm-up runner created initially
+        assert jxl.total_runners == 1
+        assert jxl.available_runners == 1
+        assert jxl.in_use_runners == 0
+
+        # After single encode: runner returned to pool
+        jxl.encode(sample_image, effort=1)
+        assert jxl.total_runners == 1
+        assert jxl.available_runners == 1
+        assert jxl.in_use_runners == 0
+
+        # Two concurrent operations trigger on-demand expansion
+        barrier = threading.Barrier(2)
+
+        def worker():
+            barrier.wait()
+            jxl.encode(big_image, effort=5)
+
+        t1 = threading.Thread(target=worker)
+        t2 = threading.Thread(target=worker)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert jxl.total_runners == 2
+        assert jxl.available_runners == 2
+        assert jxl.in_use_runners == 0
+
+
+def test_sync_pool_timeout(sample_image):
+    """With pool_size=1, a concurrent request with small timeout raises CodecTimeoutError."""
+    import threading
+
+    big_image = np.tile(sample_image, (2, 2, 1))
+    with pylibjxl.JXL(pool_size=1) as jxl:
+        errors = []
+
+        def slow_worker():
+            jxl.encode(big_image, effort=7)
+
+        def timeout_worker():
+            time.sleep(0.02)
+            try:
+                jxl.encode(big_image, effort=1, timeout=0.01)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=slow_worker)
+        t2 = threading.Thread(target=timeout_worker)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert len(errors) == 1
+        assert isinstance(errors[0], pylibjxl.CodecTimeoutError)
+        assert isinstance(errors[0], TimeoutError)
+
+
+@pytest.mark.asyncio
+async def test_async_pool_timeout(sample_image):
+    """AsyncJXL with pool_size=1 respects timeout and raises CodecTimeoutError."""
+    big_image = np.tile(sample_image, (2, 2, 1))
+    async with pylibjxl.AsyncJXL(pool_size=1) as jxl:
+        task1 = asyncio.create_task(jxl.encode_async(big_image, effort=7))
+        await asyncio.sleep(0.02)
+        with pytest.raises(pylibjxl.CodecTimeoutError) as exc_info:
+            await jxl.encode_async(big_image, effort=1, timeout=0.01)
+        assert issubclass(exc_info.type, TimeoutError)
+        await task1
+
+
+@pytest.mark.asyncio
+async def test_async_context_default_timeout(sample_image):
+    """AsyncJXL uses context default timeout if per-call timeout is omitted."""
+    big_image = np.tile(sample_image, (2, 2, 1))
+    async with pylibjxl.AsyncJXL(pool_size=1, timeout=0.01) as jxl:
+        task1 = asyncio.create_task(jxl.encode_async(big_image, effort=7))
+        await asyncio.sleep(0.02)
+        with pytest.raises(pylibjxl.CodecTimeoutError):
+            await jxl.encode_async(big_image, effort=1)
+        await task1
+

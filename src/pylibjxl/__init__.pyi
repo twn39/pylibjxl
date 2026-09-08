@@ -8,6 +8,8 @@ BufferType = Union[bytes, bytearray, memoryview, npt.NDArray[np.uint8], Any]
 
 # --- Native extension functions ---
 
+class CodecTimeoutError(TimeoutError): ...
+
 def version() -> Dict[str, int]: ...
 def decoder_version() -> int: ...
 def encoder_version() -> int: ...
@@ -21,33 +23,41 @@ def encode(
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
     icc: Optional[bytes] = None,
+    timeout: Optional[float] = None,
 ) -> bytes: ...
 @overload
 def decode(
     data: BufferType,
     metadata: Literal[False] = False,
     out: Optional[npt.NDArray[np.uint8]] = None,
+    timeout: Optional[float] = None,
 ) -> npt.NDArray[np.uint8]: ...
 @overload
 def decode(
     data: BufferType,
     metadata: Literal[True],
     out: Optional[npt.NDArray[np.uint8]] = None,
+    timeout: Optional[float] = None,
 ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
 @overload
 def decode(
-    data: BufferType, metadata: bool, out: Optional[npt.NDArray[np.uint8]] = None
+    data: BufferType,
+    metadata: bool,
+    out: Optional[npt.NDArray[np.uint8]] = None,
+    timeout: Optional[float] = None,
 ) -> Union[npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]]: ...
 def encode_jpeg(input: npt.NDArray[np.uint8], quality: int = 95) -> bytes: ...
 def decode_jpeg(
     data: BufferType, out: Optional[npt.NDArray[np.uint8]] = None
 ) -> npt.NDArray[np.uint8]: ...
-def jpeg_to_jxl(data: BufferType, effort: int = 7) -> bytes: ...
-def jxl_to_jpeg(data: BufferType) -> bytes: ...
+def jpeg_to_jxl(data: BufferType, effort: int = 7, timeout: Optional[float] = None) -> bytes: ...
+def jxl_to_jpeg(data: BufferType, timeout: Optional[float] = None) -> bytes: ...
 def jpeg_to_jxl_file(
-    in_path: Union[str, Path], out_path: Union[str, Path], effort: int = 7
+    in_path: Union[str, Path], out_path: Union[str, Path], effort: int = 7, timeout: Optional[float] = None
 ) -> None: ...
-def jxl_to_jpeg_file(in_path: Union[str, Path], out_path: Union[str, Path]) -> None: ...
+def jxl_to_jpeg_file(
+    in_path: Union[str, Path], out_path: Union[str, Path], timeout: Optional[float] = None
+) -> None: ...
 
 class _JXL:
     def __init__(
@@ -57,6 +67,9 @@ class _JXL:
         lossless: bool = False,
         decoding_speed: int = 0,
         threads: int = 0,
+        pool_size: int = 0,
+        timeout: float = 0.0,
+        idle_timeout: float = 60.0,
     ) -> None: ...
     def encode(
         self,
@@ -69,6 +82,7 @@ class _JXL:
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
         icc: Optional[bytes] = None,
+        timeout: Optional[float] = None,
     ) -> bytes: ...
     @overload
     def decode(
@@ -76,6 +90,7 @@ class _JXL:
         data: BufferType,
         metadata: Literal[False] = False,
         out: Optional[npt.NDArray[np.uint8]] = None,
+        timeout: Optional[float] = None,
     ) -> npt.NDArray[np.uint8]: ...
     @overload
     def decode(
@@ -83,6 +98,7 @@ class _JXL:
         data: BufferType,
         metadata: Literal[True],
         out: Optional[npt.NDArray[np.uint8]] = None,
+        timeout: Optional[float] = None,
     ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
     @overload
     def decode(
@@ -90,6 +106,7 @@ class _JXL:
         data: BufferType,
         metadata: bool,
         out: Optional[npt.NDArray[np.uint8]] = None,
+        timeout: Optional[float] = None,
     ) -> Union[
         npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]
     ]: ...
@@ -97,20 +114,31 @@ class _JXL:
     def decode_jpeg(
         self, data: BufferType, out: Optional[npt.NDArray[np.uint8]] = None
     ) -> npt.NDArray[np.uint8]: ...
-    def jpeg_to_jxl(self, data: BufferType, effort: Optional[int] = None) -> bytes: ...
-    def jxl_to_jpeg(self, data: BufferType) -> bytes: ...
+    def jpeg_to_jxl(self, data: BufferType, effort: Optional[int] = None, timeout: Optional[float] = None) -> bytes: ...
+    def jxl_to_jpeg(self, data: BufferType, timeout: Optional[float] = None) -> bytes: ...
     def jpeg_to_jxl_file(
         self,
         in_path: Union[str, Path],
         out_path: Union[str, Path],
         effort: Optional[int] = None,
+        timeout: Optional[float] = None,
     ) -> None: ...
     def jxl_to_jpeg_file(
-        self, in_path: Union[str, Path], out_path: Union[str, Path]
+        self, in_path: Union[str, Path], out_path: Union[str, Path], timeout: Optional[float] = None
     ) -> None: ...
     def close(self) -> None: ...
     @property
     def closed(self) -> bool: ...
+    @property
+    def pool_size(self) -> int: ...
+    @property
+    def total_runners(self) -> int: ...
+    @property
+    def available_runners(self) -> int: ...
+    @property
+    def in_use_runners(self) -> int: ...
+    @property
+    def threads_per_runner(self) -> int: ...
     def __enter__(self) -> "_JXL": ...
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
 
@@ -127,6 +155,7 @@ async def encode_async(
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
     icc: Optional[bytes] = None,
+    timeout: Optional[float] = None,
 ) -> bytes: ...
 @overload
 async def decode_async(
@@ -134,6 +163,7 @@ async def decode_async(
     *,
     metadata: Literal[False] = False,
     out: Optional[npt.NDArray[np.uint8]] = None,
+    timeout: Optional[float] = None,
 ) -> npt.NDArray[np.uint8]: ...
 @overload
 async def decode_async(
@@ -141,10 +171,15 @@ async def decode_async(
     *,
     metadata: Literal[True],
     out: Optional[npt.NDArray[np.uint8]] = None,
+    timeout: Optional[float] = None,
 ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
 @overload
 async def decode_async(
-    data: BufferType, *, metadata: bool, out: Optional[npt.NDArray[np.uint8]] = None
+    data: BufferType,
+    *,
+    metadata: bool,
+    out: Optional[npt.NDArray[np.uint8]] = None,
+    timeout: Optional[float] = None,
 ) -> Union[npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]]: ...
 @overload
 def read(
@@ -153,6 +188,7 @@ def read(
     metadata: Literal[False] = False,
     out: Optional[npt.NDArray[np.uint8]] = None,
     use_mmap: bool = False,
+    timeout: Optional[float] = None,
 ) -> npt.NDArray[np.uint8]: ...
 @overload
 def read(
@@ -161,6 +197,7 @@ def read(
     metadata: Literal[True],
     out: Optional[npt.NDArray[np.uint8]] = None,
     use_mmap: bool = False,
+    timeout: Optional[float] = None,
 ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
 @overload
 def read(
@@ -169,6 +206,7 @@ def read(
     metadata: bool,
     out: Optional[npt.NDArray[np.uint8]] = None,
     use_mmap: bool = False,
+    timeout: Optional[float] = None,
 ) -> Union[npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]]: ...
 def write(
     path: Union[str, Path],
@@ -182,6 +220,7 @@ def write(
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
     icc: Optional[bytes] = None,
+    timeout: Optional[float] = None,
 ) -> None: ...
 @overload
 async def read_async(
@@ -190,6 +229,7 @@ async def read_async(
     metadata: Literal[False] = False,
     out: Optional[npt.NDArray[np.uint8]] = None,
     use_mmap: bool = False,
+    timeout: Optional[float] = None,
 ) -> npt.NDArray[np.uint8]: ...
 @overload
 async def read_async(
@@ -198,6 +238,7 @@ async def read_async(
     metadata: Literal[True],
     out: Optional[npt.NDArray[np.uint8]] = None,
     use_mmap: bool = False,
+    timeout: Optional[float] = None,
 ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
 @overload
 async def read_async(
@@ -206,6 +247,7 @@ async def read_async(
     metadata: bool,
     out: Optional[npt.NDArray[np.uint8]] = None,
     use_mmap: bool = False,
+    timeout: Optional[float] = None,
 ) -> Union[npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]]: ...
 async def write_async(
     path: Union[str, Path],
@@ -219,9 +261,21 @@ async def write_async(
     xmp: Optional[bytes] = None,
     jumbf: Optional[bytes] = None,
     icc: Optional[bytes] = None,
+    timeout: Optional[float] = None,
 ) -> None: ...
 
 class JXL(_JXL):
+    def __init__(
+        self,
+        effort: int = 7,
+        distance: float = 1.0,
+        lossless: bool = False,
+        decoding_speed: int = 0,
+        threads: int = 0,
+        pool_size: int = 0,
+        timeout: float = 0.0,
+        idle_timeout: float = 60.0,
+    ) -> None: ...
     @overload
     def read(
         self,
@@ -230,6 +284,7 @@ class JXL(_JXL):
         metadata: Literal[False] = False,
         out: Optional[npt.NDArray[np.uint8]] = None,
         use_mmap: bool = False,
+        timeout: Optional[float] = None,
     ) -> npt.NDArray[np.uint8]: ...
     @overload
     def read(
@@ -239,6 +294,7 @@ class JXL(_JXL):
         metadata: Literal[True],
         out: Optional[npt.NDArray[np.uint8]] = None,
         use_mmap: bool = False,
+        timeout: Optional[float] = None,
     ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
     @overload
     def read(
@@ -248,6 +304,7 @@ class JXL(_JXL):
         metadata: bool,
         out: Optional[npt.NDArray[np.uint8]] = None,
         use_mmap: bool = False,
+        timeout: Optional[float] = None,
     ) -> Union[
         npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]
     ]: ...
@@ -264,6 +321,7 @@ class JXL(_JXL):
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
         icc: Optional[bytes] = None,
+        timeout: Optional[float] = None,
     ) -> None: ...
     def read_jpeg(
         self,
@@ -280,13 +338,28 @@ class JXL(_JXL):
         jpeg_path: Union[str, Path],
         jxl_path: Union[str, Path],
         effort: Optional[int] = None,
+        timeout: Optional[float] = None,
     ) -> None: ...
     def convert_jxl_to_jpeg(
-        self, jxl_path: Union[str, Path], jpeg_path: Union[str, Path]
+        self,
+        jxl_path: Union[str, Path],
+        jpeg_path: Union[str, Path],
+        timeout: Optional[float] = None,
     ) -> None: ...
     def __enter__(self) -> "JXL": ...
 
-class AsyncJXL(_JXL):
+class AsyncJXL(JXL):
+    def __init__(
+        self,
+        effort: int = 7,
+        distance: float = 1.0,
+        lossless: bool = False,
+        decoding_speed: int = 0,
+        threads: int = 0,
+        pool_size: int = 0,
+        timeout: float = 0.0,
+        idle_timeout: float = 60.0,
+    ) -> None: ...
     async def __aenter__(self) -> "AsyncJXL": ...
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
     async def encode_async(
@@ -301,6 +374,7 @@ class AsyncJXL(_JXL):
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
         icc: Optional[bytes] = None,
+        timeout: Optional[float] = None,
     ) -> bytes: ...
     @overload
     async def decode_async(
@@ -309,6 +383,7 @@ class AsyncJXL(_JXL):
         *,
         metadata: Literal[False] = False,
         out: Optional[npt.NDArray[np.uint8]] = None,
+        timeout: Optional[float] = None,
     ) -> npt.NDArray[np.uint8]: ...
     @overload
     async def decode_async(
@@ -317,6 +392,7 @@ class AsyncJXL(_JXL):
         *,
         metadata: Literal[True],
         out: Optional[npt.NDArray[np.uint8]] = None,
+        timeout: Optional[float] = None,
     ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
     @overload
     async def decode_async(
@@ -325,6 +401,7 @@ class AsyncJXL(_JXL):
         *,
         metadata: bool,
         out: Optional[npt.NDArray[np.uint8]] = None,
+        timeout: Optional[float] = None,
     ) -> Union[
         npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]
     ]: ...
@@ -336,6 +413,7 @@ class AsyncJXL(_JXL):
         metadata: Literal[False] = False,
         out: Optional[npt.NDArray[np.uint8]] = None,
         use_mmap: bool = False,
+        timeout: Optional[float] = None,
     ) -> npt.NDArray[np.uint8]: ...
     @overload
     async def read_async(
@@ -345,6 +423,7 @@ class AsyncJXL(_JXL):
         metadata: Literal[True],
         out: Optional[npt.NDArray[np.uint8]] = None,
         use_mmap: bool = False,
+        timeout: Optional[float] = None,
     ) -> Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]: ...
     @overload
     async def read_async(
@@ -354,6 +433,7 @@ class AsyncJXL(_JXL):
         metadata: bool,
         out: Optional[npt.NDArray[np.uint8]] = None,
         use_mmap: bool = False,
+        timeout: Optional[float] = None,
     ) -> Union[
         npt.NDArray[np.uint8], Tuple[npt.NDArray[np.uint8], Dict[str, bytes]]
     ]: ...
@@ -370,6 +450,7 @@ class AsyncJXL(_JXL):
         xmp: Optional[bytes] = None,
         jumbf: Optional[bytes] = None,
         icc: Optional[bytes] = None,
+        timeout: Optional[float] = None,
     ) -> None: ...
     async def encode_jpeg_async(
         self, input: npt.NDArray[np.uint8], quality: int = 95
@@ -388,17 +469,26 @@ class AsyncJXL(_JXL):
         self, path: Union[str, Path], image: npt.NDArray[np.uint8], quality: int = 95
     ) -> None: ...
     async def jpeg_to_jxl_async(
-        self, data: BufferType, effort: Optional[int] = None
+        self,
+        data: BufferType,
+        effort: Optional[int] = None,
+        timeout: Optional[float] = None,
     ) -> bytes: ...
-    async def jxl_to_jpeg_async(self, data: BufferType) -> bytes: ...
+    async def jxl_to_jpeg_async(
+        self, data: BufferType, timeout: Optional[float] = None
+    ) -> bytes: ...
     async def convert_jpeg_to_jxl_async(
         self,
         jpeg_path: Union[str, Path],
         jxl_path: Union[str, Path],
         effort: Optional[int] = None,
+        timeout: Optional[float] = None,
     ) -> None: ...
     async def convert_jxl_to_jpeg_async(
-        self, jxl_path: Union[str, Path], jpeg_path: Union[str, Path]
+        self,
+        jxl_path: Union[str, Path],
+        jpeg_path: Union[str, Path],
+        timeout: Optional[float] = None,
     ) -> None: ...
 
 async def encode_jpeg_async(
@@ -407,8 +497,12 @@ async def encode_jpeg_async(
 async def decode_jpeg_async(
     data: BufferType, *, out: Optional[npt.NDArray[np.uint8]] = None
 ) -> npt.NDArray[np.uint8]: ...
-async def jpeg_to_jxl_async(data: BufferType, effort: int = 7) -> bytes: ...
-async def jxl_to_jpeg_async(data: BufferType) -> bytes: ...
+async def jpeg_to_jxl_async(
+    data: BufferType, effort: int = 7, timeout: Optional[float] = None
+) -> bytes: ...
+async def jxl_to_jpeg_async(
+    data: BufferType, timeout: Optional[float] = None
+) -> bytes: ...
 def read_jpeg(
     path: Union[str, Path],
     *,
@@ -428,14 +522,24 @@ async def write_jpeg_async(
     path: Union[str, Path], image: npt.NDArray[np.uint8], quality: int = 95
 ) -> None: ...
 def convert_jpeg_to_jxl(
-    jpeg_path: Union[str, Path], jxl_path: Union[str, Path], effort: int = 7
+    jpeg_path: Union[str, Path],
+    jxl_path: Union[str, Path],
+    effort: int = 7,
+    timeout: Optional[float] = None,
 ) -> None: ...
 def convert_jxl_to_jpeg(
-    jxl_path: Union[str, Path], jpeg_path: Union[str, Path]
+    jxl_path: Union[str, Path],
+    jpeg_path: Union[str, Path],
+    timeout: Optional[float] = None,
 ) -> None: ...
 async def convert_jpeg_to_jxl_async(
-    jpeg_path: Union[str, Path], jxl_path: Union[str, Path], effort: int = 7
+    jpeg_path: Union[str, Path],
+    jxl_path: Union[str, Path],
+    effort: int = 7,
+    timeout: Optional[float] = None,
 ) -> None: ...
 async def convert_jxl_to_jpeg_async(
-    jxl_path: Union[str, Path], jpeg_path: Union[str, Path]
+    jxl_path: Union[str, Path],
+    jpeg_path: Union[str, Path],
+    timeout: Optional[float] = None,
 ) -> None: ...

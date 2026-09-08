@@ -43,11 +43,15 @@ void write_file_bytes(const std::string &path, const uint8_t *data, size_t size)
   }
 }
 
-std::vector<uint8_t>
-transcode_jpeg_to_jxl_raw(const uint8_t *jpeg_ptr, size_t jpeg_len, int effort, RunnerPool &pool) {
+std::vector<uint8_t> transcode_jpeg_to_jxl_raw(
+    const uint8_t *jpeg_ptr,
+    size_t jpeg_len,
+    int effort,
+    RunnerPool &pool,
+    std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
   effort = std::clamp(effort, 1, 11);
 
-  RunnerGuard guard(pool);
+  RunnerGuard guard(pool, timeout);
   void *runner = guard.get();
 
   JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
@@ -103,9 +107,12 @@ transcode_jpeg_to_jxl_raw(const uint8_t *jpeg_ptr, size_t jpeg_len, int effort, 
   return compressed;
 }
 
-std::vector<uint8_t>
-transcode_jxl_to_jpeg_raw(const uint8_t *jxl_ptr, size_t jxl_len, RunnerPool &pool) {
-  RunnerGuard guard(pool);
+std::vector<uint8_t> transcode_jxl_to_jpeg_raw(
+    const uint8_t *jxl_ptr,
+    size_t jxl_len,
+    RunnerPool &pool,
+    std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
+  RunnerGuard guard(pool, timeout);
   void *runner = guard.get();
 
   JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
@@ -184,7 +191,10 @@ transcode_jxl_to_jpeg_raw(const uint8_t *jxl_ptr, size_t jxl_len, RunnerPool &po
 
 } // namespace
 
-nb::bytes jpeg_to_jxl_impl(nb::handle jpeg_data, int effort, RunnerPool &pool) {
+nb::bytes jpeg_to_jxl_impl(nb::handle jpeg_data,
+                            int effort,
+                            RunnerPool &pool,
+                            std::optional<std::chrono::milliseconds> timeout) {
   ScopedPyBuffer py_buf(jpeg_data);
   const auto *jpeg_ptr = py_buf.data();
   const auto jpeg_len = py_buf.size();
@@ -192,16 +202,20 @@ nb::bytes jpeg_to_jxl_impl(nb::handle jpeg_data, int effort, RunnerPool &pool) {
   std::vector<uint8_t> compressed;
   {
     nb::gil_scoped_release release;
-    compressed = transcode_jpeg_to_jxl_raw(jpeg_ptr, jpeg_len, effort, pool);
+    compressed = transcode_jpeg_to_jxl_raw(jpeg_ptr, jpeg_len, effort, pool, timeout);
   }
   return nb::bytes(reinterpret_cast<const char *>(compressed.data()), compressed.size());
 }
 
-nb::bytes jpeg_to_jxl(nb::handle jpeg_data, int effort) {
-  return jpeg_to_jxl_impl(jpeg_data, effort, global_pool());
+nb::bytes jpeg_to_jxl(nb::handle jpeg_data,
+                      int effort,
+                      std::optional<std::chrono::milliseconds> timeout) {
+  return jpeg_to_jxl_impl(jpeg_data, effort, global_pool(), timeout);
 }
 
-nb::bytes jxl_to_jpeg_impl(nb::handle jxl_data, RunnerPool &pool) {
+nb::bytes jxl_to_jpeg_impl(nb::handle jxl_data,
+                           RunnerPool &pool,
+                           std::optional<std::chrono::milliseconds> timeout) {
   ScopedPyBuffer py_buf(jxl_data);
   const auto *jxl_ptr = py_buf.data();
   const auto jxl_len = py_buf.size();
@@ -209,41 +223,49 @@ nb::bytes jxl_to_jpeg_impl(nb::handle jxl_data, RunnerPool &pool) {
   std::vector<uint8_t> jpeg_data;
   {
     nb::gil_scoped_release release;
-    jpeg_data = transcode_jxl_to_jpeg_raw(jxl_ptr, jxl_len, pool);
+    jpeg_data = transcode_jxl_to_jpeg_raw(jxl_ptr, jxl_len, pool, timeout);
   }
   return nb::bytes(reinterpret_cast<const char *>(jpeg_data.data()), jpeg_data.size());
 }
 
-nb::bytes jxl_to_jpeg(nb::handle jxl_data) {
-  return jxl_to_jpeg_impl(jxl_data, global_pool());
+nb::bytes jxl_to_jpeg(nb::handle jxl_data, std::optional<std::chrono::milliseconds> timeout) {
+  return jxl_to_jpeg_impl(jxl_data, global_pool(), timeout);
 }
 
 void jpeg_to_jxl_file_impl(const std::string &in_path,
                            const std::string &out_path,
                            int effort,
-                           RunnerPool &pool) {
+                           RunnerPool &pool,
+                           std::optional<std::chrono::milliseconds> timeout) {
   nb::gil_scoped_release release;
   std::vector<uint8_t> in_data = read_file_bytes(in_path);
   std::vector<uint8_t> out_data =
-      transcode_jpeg_to_jxl_raw(in_data.data(), in_data.size(), effort, pool);
+      transcode_jpeg_to_jxl_raw(in_data.data(), in_data.size(), effort, pool, timeout);
   write_file_bytes(out_path, out_data.data(), out_data.size());
 }
 
-void jpeg_to_jxl_file(const std::string &in_path, const std::string &out_path, int effort) {
-  jpeg_to_jxl_file_impl(in_path, out_path, effort, global_pool());
+void jpeg_to_jxl_file(const std::string &in_path,
+                      const std::string &out_path,
+                      int effort,
+                      std::optional<std::chrono::milliseconds> timeout) {
+  jpeg_to_jxl_file_impl(in_path, out_path, effort, global_pool(), timeout);
 }
 
 void jxl_to_jpeg_file_impl(const std::string &in_path,
                            const std::string &out_path,
-                           RunnerPool &pool) {
+                           RunnerPool &pool,
+                           std::optional<std::chrono::milliseconds> timeout) {
   nb::gil_scoped_release release;
   std::vector<uint8_t> in_data = read_file_bytes(in_path);
-  std::vector<uint8_t> out_data = transcode_jxl_to_jpeg_raw(in_data.data(), in_data.size(), pool);
+  std::vector<uint8_t> out_data =
+      transcode_jxl_to_jpeg_raw(in_data.data(), in_data.size(), pool, timeout);
   write_file_bytes(out_path, out_data.data(), out_data.size());
 }
 
-void jxl_to_jpeg_file(const std::string &in_path, const std::string &out_path) {
-  jxl_to_jpeg_file_impl(in_path, out_path, global_pool());
+void jxl_to_jpeg_file(const std::string &in_path,
+                      const std::string &out_path,
+                      std::optional<std::chrono::milliseconds> timeout) {
+  jxl_to_jpeg_file_impl(in_path, out_path, global_pool(), timeout);
 }
 
 } // namespace pylibjxl

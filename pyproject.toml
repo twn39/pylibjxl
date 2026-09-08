@@ -48,10 +48,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/user/pylibjxl"
-Repository = "https://github.com/user/pylibjxl.git"
-Issues = "https://github.com/user/pylibjxl/issues"
-Documentation = "https://github.com/user/pylibjxl#readme"
+Homepage = "https://github.com/twn39/pylibjxl"
+Repository = "https://github.com/twn39/pylibjxl.git"
+Issues = "https://github.com/twn39/pylibjxl/issues"
+Documentation = "https://github.com/twn39/pylibjxl#readme"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

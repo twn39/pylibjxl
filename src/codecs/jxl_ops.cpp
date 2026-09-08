@@ -30,7 +30,8 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                       nb::handle xmp,
                       nb::handle jumbf,
                       nb::handle icc,
-                      RunnerPool &pool) {
+                      RunnerPool &pool,
+                      std::optional<std::chrono::milliseconds> timeout) {
   if (input.ndim() != 2 && input.ndim() != 3) {
     throw std::invalid_argument(
         "Input must be a 2D (height, width) or 3D (height, width, channels) array, got ndim=" +
@@ -65,7 +66,7 @@ nb::bytes encode_impl(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
   std::vector<uint8_t> compressed;
   {
     nb::gil_scoped_release release;
-    RunnerGuard guard(pool);
+    RunnerGuard guard(pool, timeout);
     void *runner = guard.get();
 
     JxlEncoderPtr enc(JxlEncoderCreate(nullptr));
@@ -201,16 +202,18 @@ nb::bytes encode(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
                  nb::handle exif,
                  nb::handle xmp,
                  nb::handle jumbf,
-                 nb::handle icc) {
+                 nb::handle icc,
+                 std::optional<std::chrono::milliseconds> timeout) {
   return encode_impl(
-      input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc, global_pool());
+      input, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc, global_pool(), timeout);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nb::object decode_impl(nb::handle data,
                        bool metadata,
                        std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out,
-                       RunnerPool &pool) {
+                       RunnerPool &pool,
+                       std::optional<std::chrono::milliseconds> timeout) {
   ScopedPyBuffer py_buf(data);
   const auto *jxl_data = py_buf.data();
   const auto jxl_size = py_buf.size();
@@ -224,7 +227,7 @@ nb::object decode_impl(nb::handle data,
 
   {
     nb::gil_scoped_release release;
-    RunnerGuard guard(pool);
+    RunnerGuard guard(pool, timeout);
     void *runner = guard.get();
 
     JxlDecoderPtr dec(JxlDecoderCreate(nullptr));
@@ -415,8 +418,9 @@ nb::object decode_impl(nb::handle data,
 
 nb::object decode(nb::handle data,
                   bool metadata,
-                  std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out) {
-  return decode_impl(data, metadata, out, global_pool());
+                  std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out,
+                  std::optional<std::chrono::milliseconds> timeout) {
+  return decode_impl(data, metadata, out, global_pool(), timeout);
 }
 
 } // namespace pylibjxl
