@@ -1,0 +1,37 @@
+#pragma once
+
+#include <cstdint>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+
+#include "concurrency/runner_pool.hpp"
+
+namespace pylibjxl {
+
+nanobind::bytes
+encode_impl(nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu> input,
+            int effort,
+            float distance,
+            bool lossless,
+            int decoding_speed,
+            nanobind::handle exif,
+            nanobind::handle xmp,
+            nanobind::handle jumbf,
+            nanobind::handle icc,
+            RunnerPool &pool);
+
+nanobind::bytes encode(nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu> input,
+                       int effort = 7,
+                       float distance = 1.0F,
+                       bool lossless = false,
+                       int decoding_speed = 0,
+                       nanobind::handle exif = nanobind::none(),
+                       nanobind::handle xmp = nanobind::none(),
+                       nanobind::handle jumbf = nanobind::none(),
+                       nanobind::handle icc = nanobind::none());
+
+nanobind::object decode_impl(nanobind::bytes data, bool metadata, RunnerPool &pool);
+
+nanobind::object decode(nanobind::bytes data, bool metadata = false);
+
+} // namespace pylibjxl

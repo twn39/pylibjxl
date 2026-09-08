@@ -36,17 +36,26 @@ This project maintains a codebase knowledge graph at `.codegraph/`. You MUST fol
 
 ## Architecture
 
-- **`src/main.cpp`**: The C++ entry point. Defines the `_pylibjxl` extension module.
-  - Implements GIL-free encoding, decoding, and cross-format transcoding.
-  - Uses `RunnerPool` — a thread-safe pool of `JxlResizableParallelRunner` instances for true concurrent parallelism.
-  - `RunnerGuard` provides RAII-based acquire/release of runners from the pool.
-  - Free functions (`encode`, `decode`, `jpeg_to_jxl`, etc.) use a lazily-initialized global `RunnerPool`.
-  - Handles EXIF, XMP, JUMBF metadata boxes, and ICC color profiles with `JxlGetDefaultCms()`.
-- **`src/pylibjxl/__init__.py`**: The Python wrapper.
-  - Maps low-level C++ functions to an idiomatic, user-friendly API.
-  - Implements `encode_async`, `decode_async`, and other `_async` variants using `asyncio.to_thread`.
-  - Provides `JXL` (sync) and `AsyncJXL` (async) context managers, each owning a private `RunnerPool` for controlled resource usage.
-  - Provides file I/O utilities (`read`, `write`, `read_jpeg`, `write_jpeg`, `convert_jpeg_to_jxl`, `convert_jxl_to_jpeg`).
+### C++ Core (`src/`)
+The native extension `_pylibjxl` is organized into clean, modular sub-components:
+- **`src/common/`**:
+  - `deleters.hpp`: RAII smart deleters and pointer aliases for `libjxl` and `libjpeg-turbo` handles (`JxlEncoderPtr`, `JxlDecoderPtr`, `JxlRunnerPtr`, `TjPtr`, `TjBufPtr`).
+  - `utils.hpp`: Common C++ helpers (`extract_optional_bytes`).
+- **`src/concurrency/`**:
+  - `runner_pool.hpp` / `runner_pool.cpp`: Thread-safe `RunnerPool` maintaining pools of independent `JxlResizableParallelRunner` instances, RAII `RunnerGuard`, and lazily-initialized `global_pool()`.
+- **`src/codecs/`**:
+  - `jxl_ops.hpp` / `jxl_ops.cpp`: GIL-free JXL encoding and decoding, EXIF/XMP/JUMBF box handling, and ICC profile extraction/injection with `JxlGetDefaultCms()`.
+  - `jpeg_ops.hpp` / `jpeg_ops.cpp`: GIL-free TurboJPEG encoding and decoding for RGB/RGBA buffers.
+  - `transcode.hpp` / `transcode.cpp`: Fast, lossless cross-format transcoding (`jpeg_to_jxl`, `jxl_to_jpeg`).
+- **`src/bindings/`**:
+  - `py_codec.hpp`: `PyJxlCodec` class definition managing private thread pools for context managers.
+  - `module.cpp`: Nanobind module definition exposing public C++ functions and types.
+
+### Python Layer (`src/pylibjxl/`)
+- **`src/pylibjxl/__init__.py`**: Clean unified entrypoint exposing the public API (`__all__`).
+- **`src/pylibjxl/_io.py`**: Synchronous file I/O operations (`read`, `write`, `read_jpeg`, `write_jpeg`, `convert_jpeg_to_jxl`, `convert_jxl_to_jpeg`).
+- **`src/pylibjxl/_async.py`**: Asynchronous variants using `asyncio.to_thread` for non-blocking I/O and parallel execution.
+- **`src/pylibjxl/_context.py`**: Context managers `JXL` (synchronous) and `AsyncJXL` (asynchronous) providing isolated runner pools and convenient batch/stream APIs.
 - **`src/pylibjxl/__init__.pyi`**: Complete PEP 484 type annotations and overloads for IDE autocompletion and static analysis.
 - **`third_party/`**: Contains submodules for `libjxl`, `libjpeg-turbo`, and `nanobind`.
 

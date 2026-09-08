@@ -91,7 +91,15 @@ find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 add_subdirectory(third_party/nanobind)
 
 # Define the extension module
-nanobind_add_module(_pylibjxl src/main.cpp)
+nanobind_add_module(_pylibjxl
+    src/concurrency/runner_pool.cpp
+    src/codecs/jxl_ops.cpp
+    src/codecs/jpeg_ops.cpp
+    src/codecs/transcode.cpp
+    src/bindings/module.cpp
+)
+
+target_include_directories(_pylibjxl PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # Link with libjxl and turbojpeg
 # Ensure headers are found globally
