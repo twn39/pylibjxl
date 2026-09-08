@@ -37,8 +37,11 @@ def encode(
 
     Automatically handles non-contiguous arrays safely.
     """
-    if hasattr(input, "flags") and not input.flags.c_contiguous:
-        input = np.ascontiguousarray(input)
+    if hasattr(input, "flags"):
+        if not input.flags.c_contiguous:
+            input = np.ascontiguousarray(input)
+        elif not input.flags.writeable:
+            input = np.array(input, copy=True)
     return _encode(
         input,
         effort=effort,
@@ -56,10 +59,13 @@ def encode(
 def encode_jpeg(input, quality=95):
     """Encode a numpy array (H, W, 3/4) to JPEG bytes using libjpeg-turbo.
 
-    Automatically handles non-contiguous arrays safely.
+    Automatically handles non-contiguous and read-only arrays safely.
     """
-    if hasattr(input, "flags") and not input.flags.c_contiguous:
-        input = np.ascontiguousarray(input)
+    if hasattr(input, "flags"):
+        if not input.flags.c_contiguous:
+            input = np.ascontiguousarray(input)
+        elif not input.flags.writeable:
+            input = np.array(input, copy=True)
     return _encode_jpeg(input, quality=quality)
 
 

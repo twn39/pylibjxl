@@ -44,6 +44,7 @@ from ._pylibjxl import (  # type: ignore
     jxl_to_jpeg_file,
     version,
 )
+from .pillow_plugin import register_pillow
 
 __all__ = [
     "CodecTimeoutError",
@@ -82,4 +83,5 @@ __all__ = [
     "convert_jxl_to_jpeg",
     "convert_jpeg_to_jxl_async",
     "convert_jxl_to_jpeg_async",
+    "register_pillow",
 ]

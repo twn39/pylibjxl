@@ -67,6 +67,7 @@ def jxl_to_jpeg_file(
     out_path: Union[str, Path],
     timeout: Optional[float] = None,
 ) -> None: ...
+def register_pillow(override: bool = True) -> None: ...
 
 class _JXL:
     def __init__(

@@ -98,17 +98,36 @@ info = pylibjxl.probe_file("image.jxl", use_mmap=True)
 info = await pylibjxl.probe_async(jxl_bytes)
 ```
 
+### 🖼️ Seamless Pillow Integration (`register_pillow`)
+Seamlessly register `pylibjxl` as Pillow's official JXL codec engine. Enables standard `Image.open()` and `im.save()` with true **lazy loading** (via `probe`), full EXIF/ICC metadata preservation, and multi-core acceleration:
+```python
+import pylibjxl
+from PIL import Image
+
+# Register transparently (idempotent, overrides legacy plugins by default)
+pylibjxl.register_pillow()
+
+# Open JXL image (dimensions read in ~20μs via probe, full decode deferred)
+im = Image.open("photo.jxl")
+print(im.size, im.mode, im.info.get("exif"), im.info.get("icc_profile"))
+
+# Save as JXL with custom effort / quality / lossless parameters
+im.save("output.jxl", effort=7, quality=90, lossless=False)
+```
+
 ### ⚡ Async Support
 High-performance non-blocking I/O for web servers and data pipelines.
 ```python
 import asyncio
 
+
 async def main():
     # Async encoding
     data = await pylibjxl.encode_async(image, distance=0.0)
-    
+
     # Async file reading
     img = await pylibjxl.read_async("input.jxl")
+
 
 asyncio.run(main())
 ```
@@ -135,12 +154,15 @@ import pylibjxl
 # Allocate an isolated codec with a pool of up to 8 runners and a 3.0s timeout
 codec = pylibjxl.AsyncJXL(pool_size=8, timeout=3.0)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with codec:
         yield
 
+
 app = FastAPI(title="Image Service", lifespan=lifespan)
+
 
 @app.post("/encode")
 async def encode_image(file: UploadFile):
