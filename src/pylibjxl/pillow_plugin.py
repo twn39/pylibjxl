@@ -68,7 +68,6 @@ if ImageFile is not None:
                     self.fp.seek(pos)
                 info = pylibjxl.probe(full_data)
 
-
             self._size = (info["width"], info["height"])
             channels = info["channels"]
             has_alpha = info["has_alpha"]
@@ -147,7 +146,6 @@ if ImageFile is not None:
 
 else:
     JxlImageFile = None
-
 
 
 def _save(
