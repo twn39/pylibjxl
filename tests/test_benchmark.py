@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 try:
-    import pillow_jxl
+    import pillow_jxl  # type: ignore
 except ImportError:
     pillow_jxl = None
 

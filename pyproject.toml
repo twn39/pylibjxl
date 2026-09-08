@@ -32,6 +32,21 @@ dependencies = [
     "numpy>=1.20",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "clang-tidy>=21.1.6",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-cov>=4.1.0",
+    "Pillow>=10.0.0",
+    "pillow-jxl-plugin>=1.3.7",
+    "pyright>=1.1.393",
+    "ruff>=0.9.0",
+    "psutil>=5.9.0",
+    "ty>=0.0.17",
+]
+
 [project.urls]
 Homepage = "https://github.com/user/pylibjxl"
 Repository = "https://github.com/user/pylibjxl.git"
@@ -75,6 +90,7 @@ dev = [
     "pillow-jxl-plugin>=1.3.7",
     "pyright>=1.1.393",
     "ruff>=0.9.0",
+    "psutil>=5.9.0",
     "ty>=0.0.17",
 ]
 
