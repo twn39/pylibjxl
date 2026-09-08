@@ -121,6 +121,12 @@ Prefer `asyncio.to_thread` in the Python layer for I/O and CPU-bound tasks that 
   - Decoded via `JxlDecoderGetColorAsICCProfile(..., JXL_COLOR_PROFILE_TARGET_ORIGINAL, ...)` with default CMS registered (`JxlDecoderSetCms(dec.get(), *JxlGetDefaultCms())`).
   - Decoded metadata dictionary returns both `"icc"` and `"icc_profile"` for Pillow ecosystem compatibility when an ICC profile is present.
 
+### Zero-Copy Buffer Protocol & In-Place Decode
+- **Buffer Protocol (Ingress)**: `decode`, `decode_jpeg`, `jpeg_to_jxl`, and `jxl_to_jpeg` accept any Python object supporting the buffer protocol (`bytes`, `bytearray`, `memoryview`, `mmap.mmap`, `ndarray`) using `ScopedPyBuffer` without copying data.
+- **In-Place Output (Egress)**: `decode` and `decode_jpeg` support an optional `out` parameter (C-contiguous uint8 `numpy.ndarray`), allowing zero-allocation in-place decoding.
+- **Memory-Mapped I/O**: `read` and `read_jpeg` support `use_mmap=True` for direct OS page-cache streaming into the decoder.
+- **Direct File Transcoding**: `jpeg_to_jxl_file` and `jxl_to_jpeg_file` operate entirely in C++ without allocating intermediate Python heap objects.
+
 ### Code Quality
 - **Linting**: Uses `ruff` (configured in `pyproject.toml`).
 - **Typing**: Uses `pyright` for type checking.

@@ -204,16 +204,15 @@ nb::bytes encode(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nb::object decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
-  char *raw_ptr = nullptr;
-  Py_ssize_t raw_size = 0;
-  if (PyBytes_AsStringAndSize(data.ptr(), &raw_ptr, &raw_size) != 0) {
-    throw nb::python_error();
-  }
-  const auto *jxl_data = reinterpret_cast<const uint8_t *>(raw_ptr);
-  const auto jxl_size = static_cast<size_t>(raw_size);
+nb::object decode_impl(nb::handle data,
+                       bool metadata,
+                       std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out,
+                       RunnerPool &pool) {
+  ScopedPyBuffer py_buf(data);
+  const auto *jxl_data = py_buf.data();
+  const auto jxl_size = py_buf.size();
 
-  JxlBasicInfo info;
+  JxlBasicInfo info{};
   size_t channels = 0;
   std::unique_ptr<uint8_t[]> temp_owner;
   uint8_t *result_ptr_var = nullptr;
@@ -298,8 +297,20 @@ nb::object decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
       }
       if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
         const size_t result_bytes = static_cast<size_t>(info.ysize * info.xsize * channels);
-        temp_owner.reset(new uint8_t[result_bytes]);
-        result_ptr_var = temp_owner.get();
+        if (out.has_value()) {
+          if (out->ndim() != 3 || out->shape(0) != info.ysize || out->shape(1) != info.xsize ||
+              out->shape(2) != channels) {
+            throw std::invalid_argument(
+                "Output buffer shape (" + std::to_string(out->shape(0)) + ", " +
+                std::to_string(out->shape(1)) + ", " + std::to_string(out->shape(2)) +
+                ") does not match image shape (" + std::to_string(info.ysize) + ", " +
+                std::to_string(info.xsize) + ", " + std::to_string(channels) + ")");
+          }
+          result_ptr_var = static_cast<uint8_t *>(out->data());
+        } else {
+          temp_owner.reset(new uint8_t[result_bytes]);
+          result_ptr_var = temp_owner.get();
+        }
         if (JXL_DEC_SUCCESS !=
             JxlDecoderSetImageOutBuffer(dec.get(), &format, result_ptr_var, result_bytes)) {
           throw std::runtime_error("JxlDecoderSetImageOutBuffer failed");
@@ -352,14 +363,20 @@ nb::object decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  size_t shape[3] = {static_cast<size_t>(info.ysize), static_cast<size_t>(info.xsize), channels};
-  nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); });
-  temp_owner.release();
-  nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> result(result_ptr_var, 3, shape, owner);
+  nb::object py_result;
+  if (out.has_value()) {
+    py_result = nb::cast(*out);
+  } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    size_t shape[3] = {static_cast<size_t>(info.ysize), static_cast<size_t>(info.xsize), channels};
+    nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); });
+    temp_owner.release();
+    nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> result(result_ptr_var, 3, shape, owner);
+    py_result = nb::cast(result);
+  }
 
   if (!metadata) {
-    return nb::cast(result);
+    return py_result;
   }
 
   nb::dict meta;
@@ -377,11 +394,13 @@ nb::object decode_impl(nb::bytes data, bool metadata, RunnerPool &pool) {
       meta["jumbf"] = nb::bytes(reinterpret_cast<const char *>(value.data()), value.size());
     }
   }
-  return nb::make_tuple(result, meta);
+  return nb::make_tuple(py_result, meta);
 }
 
-nb::object decode(nb::bytes data, bool metadata) {
-  return decode_impl(data, metadata, global_pool());
+nb::object decode(nb::handle data,
+                  bool metadata,
+                  std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out) {
+  return decode_impl(data, metadata, out, global_pool());
 }
 
 } // namespace pylibjxl

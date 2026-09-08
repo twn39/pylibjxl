@@ -1,21 +1,71 @@
+import mmap
 from pathlib import Path
+
+import numpy as np
 
 from ._pylibjxl import (  # type: ignore
     decode,
     decode_jpeg,
-    encode,
-    encode_jpeg,
-    jpeg_to_jxl,
-    jxl_to_jpeg,
+    jpeg_to_jxl_file,
+    jxl_to_jpeg_file,
+)
+from ._pylibjxl import (  # type: ignore
+    encode as _encode,
+)
+from ._pylibjxl import (
+    encode_jpeg as _encode_jpeg,
 )
 
 
-def read(path, *, metadata=False):
+def encode(
+    input,
+    effort=7,
+    distance=1.0,
+    lossless=False,
+    decoding_speed=0,
+    *,
+    exif=None,
+    xmp=None,
+    jumbf=None,
+    icc=None,
+):
+    """Encode a numpy array (H, W, C) to JXL bytes.
+
+    Automatically handles non-contiguous arrays safely.
+    """
+    if hasattr(input, "flags") and not input.flags.c_contiguous:
+        input = np.ascontiguousarray(input)
+    return _encode(
+        input,
+        effort=effort,
+        distance=distance,
+        lossless=lossless,
+        decoding_speed=decoding_speed,
+        exif=exif,
+        xmp=xmp,
+        jumbf=jumbf,
+        icc=icc,
+    )
+
+
+def encode_jpeg(input, quality=95):
+    """Encode a numpy array (H, W, 3/4) to JPEG bytes using libjpeg-turbo.
+
+    Automatically handles non-contiguous arrays safely.
+    """
+    if hasattr(input, "flags") and not input.flags.c_contiguous:
+        input = np.ascontiguousarray(input)
+    return _encode_jpeg(input, quality=quality)
+
+
+def read(path, *, metadata=False, out=None, use_mmap=False):
     """Read a JXL image file and return a numpy array (H, W, C).
 
     Args:
         path: Path to a .jxl file (str or Path).
         metadata: If True, also return metadata dict (default False).
+        out: Optional pre-allocated C-contiguous uint8 numpy array for zero-copy in-place decode.
+        use_mmap: If True, uses memory-mapped file for zero-copy reading (default False).
 
     Returns:
         numpy.ndarray when metadata=False,
@@ -27,8 +77,14 @@ def read(path, *, metadata=False):
     filepath = Path(path)
     if not filepath.exists():
         raise FileNotFoundError(f"No such file: '{filepath}'")
-    data = filepath.read_bytes()
-    return decode(data, metadata)
+
+    if use_mmap:
+        with open(filepath, "rb") as f:
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                return decode(mm, metadata=metadata, out=out)
+    else:
+        data = filepath.read_bytes()
+        return decode(data, metadata=metadata, out=out)
 
 
 def write(
@@ -61,16 +117,18 @@ def write(
     filepath = Path(path)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     data = encode(
-        image, effort, distance, lossless, decoding_speed, exif, xmp, jumbf, icc
+        image, effort, distance, lossless, decoding_speed, exif=exif, xmp=xmp, jumbf=jumbf, icc=icc
     )
     filepath.write_bytes(data)
 
 
-def read_jpeg(path):
+def read_jpeg(path, *, out=None, use_mmap=False):
     """Read a JPEG image file and return a numpy array (H, W, 3).
 
     Args:
         path: Path to a .jpg/.jpeg file (str or Path).
+        out: Optional pre-allocated C-contiguous uint8 numpy array for in-place decode.
+        use_mmap: If True, uses memory-mapped file for zero-copy reading (default False).
 
     Returns:
         numpy.ndarray of shape (H, W, 3), dtype uint8.
@@ -81,8 +139,14 @@ def read_jpeg(path):
     filepath = Path(path)
     if not filepath.exists():
         raise FileNotFoundError(f"No such file: '{filepath}'")
-    data = filepath.read_bytes()
-    return decode_jpeg(data)
+
+    if use_mmap:
+        with open(filepath, "rb") as f:
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                return decode_jpeg(mm, out=out)
+    else:
+        data = filepath.read_bytes()
+        return decode_jpeg(data, out=out)
 
 
 def write_jpeg(path, image, quality=95):
@@ -108,33 +172,29 @@ def convert_jpeg_to_jxl(jpeg_path, jxl_path, effort=7):
     Args:
         jpeg_path: Input JPEG file path (str or Path).
         jxl_path: Output JXL file path (str or Path).
-        effort: Encoding effort [1-10] (default 7).
+        effort: Encoding effort [1-11] (default 7).
     """
     jpeg_filepath = Path(jpeg_path)
     if not jpeg_filepath.exists():
         raise FileNotFoundError(f"No such file: '{jpeg_filepath}'")
     jxl_filepath = Path(jxl_path)
     jxl_filepath.parent.mkdir(parents=True, exist_ok=True)
-    jpeg_data = jpeg_filepath.read_bytes()
-    jxl_data = jpeg_to_jxl(jpeg_data, effort=effort)
-    jxl_filepath.write_bytes(jxl_data)
+    jpeg_to_jxl_file(str(jpeg_filepath), str(jxl_filepath), effort=effort)
 
 
 def convert_jxl_to_jpeg(jxl_path, jpeg_path):
-    """Convert a JXL file to JPEG file.
+    """Convert a JXL file to JPEG file (lossless reconstruction).
 
     If the JXL was created via lossless JPEG transcoding (jpeg_to_jxl),
     the original JPEG is reconstructed losslessly. Otherwise raises an error.
 
     Args:
         jxl_path: Input JXL file path (str or Path).
-        jpeg_path: Input JPEG file path (str or Path).
+        jpeg_path: Output JPEG file path (str or Path).
     """
     jxl_filepath = Path(jxl_path)
     if not jxl_filepath.exists():
         raise FileNotFoundError(f"No such file: '{jxl_filepath}'")
     jpeg_filepath = Path(jpeg_path)
     jpeg_filepath.parent.mkdir(parents=True, exist_ok=True)
-    jxl_data = jxl_filepath.read_bytes()
-    jpeg_data = jxl_to_jpeg(jxl_data)
-    jpeg_filepath.write_bytes(jpeg_data)
+    jxl_to_jpeg_file(str(jxl_filepath), str(jpeg_filepath))

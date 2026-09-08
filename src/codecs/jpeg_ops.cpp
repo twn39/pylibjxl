@@ -7,6 +7,7 @@
 #include <turbojpeg.h>
 
 #include "common/deleters.hpp"
+#include "common/utils.hpp"
 
 namespace nb = nanobind;
 
@@ -27,6 +28,8 @@ nb::bytes encode_jpeg(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
   quality = std::clamp(quality, 1, 100);
 
   const auto *input_ptr = static_cast<const uint8_t *>(input.data());
+  int pixel_format = (channels == 3) ? TJPF_RGB : TJPF_RGBA;
+  int subsamp = TJSAMP_444;
 
   unsigned char *jpeg_buf = nullptr;
   unsigned long jpeg_size = 0; // NOLINT(google-runtime-int)
@@ -38,9 +41,6 @@ nb::bytes encode_jpeg(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
     if (compressor == nullptr) {
       throw std::runtime_error("tjInitCompress failed");
     }
-
-    int pixel_format = (channels == 3) ? TJPF_RGB : TJPF_RGBA;
-    int subsamp = TJSAMP_444;
 
     if (tjCompress2(compressor.get(),
                     static_cast<const unsigned char *>(input_ptr),
@@ -62,15 +62,11 @@ nb::bytes encode_jpeg(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
   return nb::bytes(reinterpret_cast<const char *>(jpeg_buf), jpeg_size);
 }
 
-nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> decode_jpeg(nb::bytes data) {
-  char *raw_ptr = nullptr;
-  Py_ssize_t raw_size = 0;
-  if (PyBytes_AsStringAndSize(data.ptr(), &raw_ptr, &raw_size) != 0) {
-    throw nb::python_error();
-  }
-
-  const auto *jpeg_data = reinterpret_cast<const unsigned char *>(raw_ptr);
-  const auto jpeg_size = static_cast<unsigned long>(raw_size); // NOLINT
+nb::object decode_jpeg(nb::handle data,
+                       std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out) {
+  ScopedPyBuffer py_buf(data);
+  const auto *jpeg_data = py_buf.data();
+  const auto jpeg_size = static_cast<unsigned long>(py_buf.size());
 
   int width = 0;
   int height = 0;
@@ -93,8 +89,20 @@ nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> decode_jpeg(nb::bytes data) {
                                tjGetErrorStr2(decompressor.get()));
     }
 
-    temp_owner.reset(new uint8_t[height * width * 3]);
-    result_ptr_var = temp_owner.get();
+    if (out.has_value()) {
+      if (out->ndim() != 3 || out->shape(0) != static_cast<size_t>(height) ||
+          out->shape(1) != static_cast<size_t>(width) || out->shape(2) != 3) {
+        throw std::invalid_argument("Output buffer shape (" + std::to_string(out->shape(0)) + ", " +
+                                    std::to_string(out->shape(1)) + ", " +
+                                    std::to_string(out->shape(2)) +
+                                    ") does not match JPEG image shape (" + std::to_string(height) +
+                                    ", " + std::to_string(width) + ", 3)");
+      }
+      result_ptr_var = static_cast<uint8_t *>(out->data());
+    } else {
+      temp_owner.reset(new uint8_t[height * width * 3]);
+      result_ptr_var = temp_owner.get();
+    }
 
     if (tjDecompress2(decompressor.get(),
                       jpeg_data,
@@ -110,12 +118,17 @@ nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> decode_jpeg(nb::bytes data) {
     }
   }
 
+  if (out.has_value()) {
+    return nb::cast(*out);
+  }
+
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   size_t shape[3] = {static_cast<size_t>(height), static_cast<size_t>(width), 3};
   nb::capsule owner(result_ptr_var, [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); });
   temp_owner.release();
 
-  return nb::ndarray<uint8_t, nb::numpy, nb::device::cpu>(result_ptr_var, 3, shape, owner);
+  return nb::cast(
+      nb::ndarray<uint8_t, nb::numpy, nb::device::cpu>(result_ptr_var, 3, shape, owner));
 }
 
 } // namespace pylibjxl

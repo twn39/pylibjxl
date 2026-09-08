@@ -1,5 +1,7 @@
 import asyncio
 
+import numpy as np
+
 from ._io import (
     convert_jpeg_to_jxl,
     convert_jxl_to_jpeg,
@@ -34,6 +36,8 @@ async def encode_async(
 
     Releases the GIL during the encoding process.
     """
+    if hasattr(input, "flags") and not input.flags.c_contiguous:
+        input = np.ascontiguousarray(input)
     return await asyncio.to_thread(
         encode,
         input,
@@ -48,19 +52,22 @@ async def encode_async(
     )
 
 
-async def decode_async(data, *, metadata=False):
+async def decode_async(data, *, metadata=False, out=None):
     """Asynchronously decode JXL bytes to a numpy array (H, W, C).
 
     Releases the GIL during the decoding process.
 
     When metadata=True, returns (array, dict) with extracted metadata.
+    When out is provided, decodes in-place into the pre-allocated array.
     """
-    return await asyncio.to_thread(decode, data, metadata)
+    return await asyncio.to_thread(decode, data, metadata=metadata, out=out)
 
 
-async def read_async(path, *, metadata=False):
+async def read_async(path, *, metadata=False, out=None, use_mmap=False):
     """Asynchronously read a JXL image file and return a numpy array."""
-    return await asyncio.to_thread(read, path, metadata=metadata)
+    return await asyncio.to_thread(
+        read, path, metadata=metadata, out=out, use_mmap=use_mmap
+    )
 
 
 async def write_async(
@@ -77,6 +84,8 @@ async def write_async(
     icc=None,
 ):
     """Asynchronously encode a numpy array and write it to a JXL file."""
+    if hasattr(image, "flags") and not image.flags.c_contiguous:
+        image = np.ascontiguousarray(image)
     return await asyncio.to_thread(
         write,
         path,
@@ -94,12 +103,14 @@ async def write_async(
 
 async def encode_jpeg_async(input, quality=95):
     """Async encode numpy array to JPEG bytes."""
+    if hasattr(input, "flags") and not input.flags.c_contiguous:
+        input = np.ascontiguousarray(input)
     return await asyncio.to_thread(encode_jpeg, input, quality=quality)
 
 
-async def decode_jpeg_async(data):
+async def decode_jpeg_async(data, *, out=None):
     """Async decode JPEG bytes to numpy array."""
-    return await asyncio.to_thread(decode_jpeg, data)
+    return await asyncio.to_thread(decode_jpeg, data, out=out)
 
 
 async def jpeg_to_jxl_async(data, effort=7):
@@ -112,13 +123,15 @@ async def jxl_to_jpeg_async(data):
     return await asyncio.to_thread(jxl_to_jpeg, data)
 
 
-async def read_jpeg_async(path):
+async def read_jpeg_async(path, *, out=None, use_mmap=False):
     """Asynchronously read a JPEG image file and return a numpy array."""
-    return await asyncio.to_thread(read_jpeg, path)
+    return await asyncio.to_thread(read_jpeg, path, out=out, use_mmap=use_mmap)
 
 
 async def write_jpeg_async(path, image, quality=95):
     """Asynchronously encode a numpy array and write it to a JPEG file."""
+    if hasattr(image, "flags") and not image.flags.c_contiguous:
+        image = np.ascontiguousarray(image)
     return await asyncio.to_thread(write_jpeg, path, image, quality)
 
 

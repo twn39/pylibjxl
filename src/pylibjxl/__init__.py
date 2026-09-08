@@ -21,6 +21,8 @@ from ._context import (
 from ._io import (
     convert_jpeg_to_jxl,
     convert_jxl_to_jpeg,
+    encode,
+    encode_jpeg,
     read,
     read_jpeg,
     write,
@@ -30,11 +32,11 @@ from ._pylibjxl import (  # type: ignore
     decode,
     decode_jpeg,
     decoder_version,
-    encode,
-    encode_jpeg,
     encoder_version,
     jpeg_to_jxl,
+    jpeg_to_jxl_file,
     jxl_to_jpeg,
+    jxl_to_jpeg_file,
     version,
 )
 
@@ -60,6 +62,8 @@ __all__ = [
     "write_jpeg_async",
     "jpeg_to_jxl",
     "jxl_to_jpeg",
+    "jpeg_to_jxl_file",
+    "jxl_to_jpeg_file",
     "encode_jpeg_async",
     "decode_jpeg_async",
     "jpeg_to_jxl_async",

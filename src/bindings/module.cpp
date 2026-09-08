@@ -56,16 +56,20 @@ NB_MODULE(_pylibjxl, m) {
         "jumbf"_a = nb::none(),
         "icc"_a = nb::none());
 
-  m.def("decode",
-        &decode,
-        "Decode JXL bytes to a uint8 numpy array (H, W, C).\n\n"
-        "When metadata=True, returns a tuple of (array, dict) where dict\n"
-        "contains the extracted metadata (exif, xmp, jumbf, icc, icc_profile as bytes).\n\n"
-        "Args:\n"
-        "    data: bytes object containing JXL-encoded data\n"
-        "    metadata: If True, also extract metadata boxes and color profiles (default False)\n",
-        "data"_a,
-        "metadata"_a = false);
+  m.def(
+      "decode",
+      &decode,
+      "Decode JXL data (bytes, bytearray, memoryview, mmap) to a uint8 numpy array (H, W, C).\n\n"
+      "When metadata=True, returns a tuple of (array, dict) where dict\n"
+      "contains the extracted metadata (exif, xmp, jumbf, icc, icc_profile as bytes).\n\n"
+      "When out is provided, decodes in-place into the pre-allocated C-contiguous array.\n\n"
+      "Args:\n"
+      "    data: Buffer object containing JXL-encoded data\n"
+      "    metadata: If True, also extract metadata boxes and color profiles (default False)\n"
+      "    out: Optional pre-allocated uint8 numpy array (H, W, C) for zero-copy in-place decode\n",
+      "data"_a,
+      "metadata"_a = false,
+      "out"_a = nb::none());
 
   nb::class_<PyJxlCodec>(m,
                          "JXL",
@@ -102,18 +106,21 @@ NB_MODULE(_pylibjxl, m) {
            "icc"_a = nb::none())
       .def("decode",
            &PyJxlCodec::decode_image,
-           "Decode JXL bytes, optionally extracting metadata.",
+           "Decode JXL bytes, optionally extracting metadata and using an in-place output buffer.",
            "data"_a,
-           "metadata"_a = false)
+           "metadata"_a = false,
+           "out"_a = nb::none())
       .def("encode_jpeg",
            &PyJxlCodec::encode_jpeg_image,
-           "Encode numpy array to JPEG bytes (uses libjpeg-turbo).",
+           "Encode numpy array to JPEG bytes (uses libjpeg-turbo, zero-copy direct output).",
            "input"_a,
            "quality"_a = 95)
-      .def("decode_jpeg",
-           &PyJxlCodec::decode_jpeg_image,
-           "Decode JPEG bytes to numpy array (H, W, 3).",
-           "data"_a)
+      .def(
+          "decode_jpeg",
+          &PyJxlCodec::decode_jpeg_image,
+          "Decode JPEG bytes to numpy array (H, W, 3), optionally using an in-place output buffer.",
+          "data"_a,
+          "out"_a = nb::none())
       .def("jpeg_to_jxl",
            &PyJxlCodec::jpeg_to_jxl_image,
            "Losslessly recompress JPEG bytes to JXL bytes.",
@@ -123,6 +130,17 @@ NB_MODULE(_pylibjxl, m) {
            &PyJxlCodec::jxl_to_jpeg_image,
            "Reconstruct original JPEG bytes from JXL bytes.",
            "data"_a)
+      .def("jpeg_to_jxl_file",
+           &PyJxlCodec::jpeg_to_jxl_file_image,
+           "Direct C++ file-to-file lossless JPEG to JXL recompression.",
+           "in_path"_a,
+           "out_path"_a,
+           "effort"_a = nb::none())
+      .def("jxl_to_jpeg_file",
+           &PyJxlCodec::jxl_to_jpeg_file_image,
+           "Direct C++ file-to-file lossless JXL to JPEG reconstruction.",
+           "in_path"_a,
+           "out_path"_a)
       .def("close", &PyJxlCodec::close, "Close the codec and release thread pool resources.")
       .def_prop_ro("closed", &PyJxlCodec::closed, "Whether the codec has been closed.")
       .def("__enter__", &PyJxlCodec::enter, nb::rv_policy::reference)
@@ -134,7 +152,7 @@ NB_MODULE(_pylibjxl, m) {
 
   m.def("encode_jpeg",
         &encode_jpeg,
-        "Encode numpy array to JPEG bytes (using libjpeg-turbo).\n"
+        "Encode numpy array to JPEG bytes (using libjpeg-turbo with zero intermediate copies).\n"
         "Input: (H, W, 3) or (H, W, 4).\n"
         "Quality: 1-100 (default 95).",
         "input"_a,
@@ -142,17 +160,32 @@ NB_MODULE(_pylibjxl, m) {
 
   m.def("decode_jpeg",
         &decode_jpeg,
-        "Decode JPEG bytes to numpy array (H, W, 3) (using libjpeg-turbo).",
-        "data"_a);
+        "Decode JPEG bytes to numpy array (H, W, 3) (using libjpeg-turbo).\n"
+        "When out is provided, decodes in-place into the pre-allocated C-contiguous array.\n",
+        "data"_a,
+        "out"_a = nb::none());
 
   m.def("jpeg_to_jxl",
         &jpeg_to_jxl,
-        "Losslessly recompress valid JPEG bytes to JXL bytes.",
+        "Losslessly recompress valid JPEG data to JXL bytes.",
         "data"_a,
         "effort"_a = 7);
 
   m.def("jxl_to_jpeg",
         &jxl_to_jpeg,
-        "Reconstruct original JPEG bytes from JXL bytes (if recompressed).",
+        "Reconstruct original JPEG data from JXL bytes (if recompressed).",
         "data"_a);
+
+  m.def("jpeg_to_jxl_file",
+        &jpeg_to_jxl_file,
+        "Direct C++ file-to-file lossless JPEG to JXL recompression (zero Python heap overhead).",
+        "in_path"_a,
+        "out_path"_a,
+        "effort"_a = 7);
+
+  m.def("jxl_to_jpeg_file",
+        &jxl_to_jpeg_file,
+        "Direct C++ file-to-file lossless JXL to JPEG reconstruction (zero Python heap overhead).",
+        "in_path"_a,
+        "out_path"_a);
 }

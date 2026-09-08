@@ -6,8 +6,10 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/string.h>
 #include <optional>
 #include <stdexcept>
+#include <string>
 
 #include "codecs/jpeg_ops.hpp"
 #include "codecs/jxl_ops.hpp"
@@ -28,8 +30,6 @@ public:
       : effort_(std::clamp(effort, 1, 11)),
         distance_(lossless ? 0.0F : std::clamp(distance, 0.0F, 25.0F)), lossless_(lossless),
         decoding_speed_(std::clamp(decoding_speed, 0, 4)) {
-    // threads param controls threads_per_runner; pool_size is auto-calculated.
-    // threads=0 → auto-balance (default).
     size_t tpr = threads > 0 ? static_cast<size_t>(threads) : 0;
     pool_ = std::make_unique<RunnerPool>(0, tpr);
   }
@@ -58,9 +58,11 @@ public:
     return encode_impl(input, eff, dist, ll, ds, exif, xmp, jumbf, icc, *pool_);
   }
 
-  nb::object decode_image(nb::bytes data, bool metadata) {
+  nb::object decode_image(nb::handle data,
+                          bool metadata,
+                          std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out) {
     check_closed();
-    return decode_impl(data, metadata, *pool_);
+    return decode_impl(data, metadata, out, *pool_);
   }
 
   nb::bytes encode_jpeg_image(nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu> input,
@@ -69,19 +71,33 @@ public:
     return encode_jpeg(input, quality);
   }
 
-  nb::ndarray<uint8_t, nb::numpy, nb::device::cpu> decode_jpeg_image(nb::bytes data) {
+  nb::object
+  decode_jpeg_image(nb::handle data,
+                    std::optional<nb::ndarray<uint8_t, nb::c_contig, nb::device::cpu>> out) {
     check_closed();
-    return decode_jpeg(data);
+    return decode_jpeg(data, out);
   }
 
-  nb::bytes jpeg_to_jxl_image(nb::bytes jpeg_data, std::optional<int> effort) {
+  nb::bytes jpeg_to_jxl_image(nb::handle jpeg_data, std::optional<int> effort) {
     check_closed();
     return jpeg_to_jxl_impl(jpeg_data, effort.value_or(effort_), *pool_);
   }
 
-  nb::bytes jxl_to_jpeg_image(nb::bytes jxl_data) {
+  nb::bytes jxl_to_jpeg_image(nb::handle jxl_data) {
     check_closed();
     return jxl_to_jpeg_impl(jxl_data, *pool_);
+  }
+
+  void jpeg_to_jxl_file_image(const std::string &in_path,
+                              const std::string &out_path,
+                              std::optional<int> effort) {
+    check_closed();
+    jpeg_to_jxl_file_impl(in_path, out_path, effort.value_or(effort_), *pool_);
+  }
+
+  void jxl_to_jpeg_file_image(const std::string &in_path, const std::string &out_path) {
+    check_closed();
+    jxl_to_jpeg_file_impl(in_path, out_path, *pool_);
   }
 
   PyJxlCodec &enter() {

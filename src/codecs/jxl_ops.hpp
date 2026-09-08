@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
+#include <optional>
 
 #include "concurrency/runner_pool.hpp"
 
@@ -30,8 +32,16 @@ nanobind::bytes encode(nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::
                        nanobind::handle jumbf = nanobind::none(),
                        nanobind::handle icc = nanobind::none());
 
-nanobind::object decode_impl(nanobind::bytes data, bool metadata, RunnerPool &pool);
+nanobind::object decode_impl(
+    nanobind::handle data,
+    bool metadata,
+    std::optional<nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu>> out,
+    RunnerPool &pool);
 
-nanobind::object decode(nanobind::bytes data, bool metadata = false);
+nanobind::object
+decode(nanobind::handle data,
+       bool metadata = false,
+       std::optional<nanobind::ndarray<uint8_t, nanobind::c_contig, nanobind::device::cpu>> out =
+           std::nullopt);
 
 } // namespace pylibjxl
